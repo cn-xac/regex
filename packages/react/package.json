@@ -1,6 +1,6 @@
 {
   "name": "@x-ac/regex-react",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "React 18/19 component adapter for @x-ac/regex-core — function component + hooks + forwardRef, mobile-ready, thin wrapper over the framework-agnostic engine. 正则工作台的 React 组件适配器。",
   "type": "module",
   "main": "./dist/index.js",

@@ -20,7 +20,7 @@
  * 2. **不碰 DOM** —— 不引用 `document` / `window` / `navigator`，语言候选由调用方传入。
  */
 
-export const CORE_VERSION = '0.0.0';
+export const CORE_VERSION = '0.0.1';
 
 export type {
   FlagSet,

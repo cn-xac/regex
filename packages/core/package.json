@@ -1,6 +1,6 @@
 {
   "name": "@x-ac/regex-core",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Framework-agnostic regex workbench engine: safe compilation with structured issues, UTF-16 capture-group matching, DOM-free railroad/AST layout with SVG and Canvas painters, bilingual i18n (zh-CN fallback). Ships ESM, CJS, UMD and IIFE builds. 无框架依赖的正则工作台引擎，四格式产出。",
   "type": "module",
   "main": "./dist/index.cjs",

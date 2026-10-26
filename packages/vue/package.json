@@ -1,6 +1,6 @@
 {
   "name": "@x-ac/regex-vue",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Vue 3 SFC adapter for the @x-ac/regex-core regex workbench engine — Composition API, mobile-ready, thin wrapper over the framework-agnostic engine. 正则工作台的 Vue 3 组件适配器。",
   "type": "module",
   "main": "./dist/index.js",

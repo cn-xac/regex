@@ -97,8 +97,15 @@ describe('core 铁律', () => {
 describe('版本一致性', () => {
   it('CORE_VERSION 与 package.json 完全一致', () => {
     expect(api.CORE_VERSION).toBe(pkg.version);
-    // 占位阶段只允许 0.0.0；`0.0.0-stage` 会撞 npm Staged Publishing 保留字
-    expect(pkg.version).toBe('0.0.0');
+  });
+
+  /**
+   * 只守真不变量，不钉具体数字 —— 钉死某个版本会让每次正常发版都变成假报警。
+   * 要求三段式干净 semver、无预发布后缀：占位版靠 **dist-tag**（`stage`）区分，
+   * 而不是靠 `0.0.0-stage` 这种版本号形态 —— 后者会去碰 npm Staged Publishing 的保留字。
+   */
+  it('版本号是三段式 semver，不带预发布后缀', () => {
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });
 

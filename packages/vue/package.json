@@ -1,0 +1,69 @@
+{
+  "name": "@x-ac/regex-vue",
+  "version": "0.0.0",
+  "description": "Vue 3 SFC adapter for the @x-ac/regex-core regex workbench engine — Composition API, mobile-ready, thin wrapper over the framework-agnostic engine. 正则工作台的 Vue 3 组件适配器。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./style.css": "./dist/index.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "vite build --mode lib",
+    "dev": "vite build --mode lib --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "vue": "^3.4.0"
+  },
+  "dependencies": {
+    "@x-ac/regex-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.10",
+    "@vue/language-core": "^3.3.13",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vite-plugin-dts": "^5.1.2",
+    "vue": "^3.5.44"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "regex",
+    "regular-expression",
+    "regexp",
+    "vue",
+    "vue3",
+    "vue-component",
+    "sfc",
+    "composition-api",
+    "railroad-diagram",
+    "i18n",
+    "h5",
+    "mobile-web"
+  ],
+  "license": "MIT",
+  "author": { "name": "xyj2156" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cn-xac/regex.git",
+    "directory": "packages/vue"
+  },
+  "homepage": "https://github.com/cn-xac/regex/tree/main/packages/vue#readme",
+  "bugs": { "url": "https://github.com/cn-xac/regex/issues" },
+  "publishConfig": { "access": "public" }
+}

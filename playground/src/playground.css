@@ -1,0 +1,129 @@
+/**
+ * Playground 自有样式 —— 只服务演示外壳，类名一律 `.pg-*`。
+ *
+ * 与 `@x-ac/regex-core/style.css`（`.x-ac-regex-*`）严格分开：那套是随包发布的产品皮肤，
+ * 这套只是 demo 的排版。混在一起会让"哪些样式属于库"变得不可判定。
+ */
+
+:root {
+  --pg-fg: #1c2430;
+  --pg-bg: #f5f7fa;
+  --pg-card: #ffffff;
+  --pg-line: #dbe2ea;
+  --pg-accent: #1c63b5;
+  --pg-muted: #64748b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pg-fg: #e6eaf0;
+    --pg-bg: #0e1116;
+    --pg-card: #171b22;
+    --pg-line: #2b3240;
+    --pg-accent: #74c0fc;
+    --pg-muted: #9aa5b4;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--pg-fg);
+  background: var(--pg-bg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.pg-shell {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 16px 14px 40px;
+}
+
+.pg-header h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.pg-header p {
+  margin: 0;
+  color: var(--pg-muted);
+  font-size: 13px;
+}
+
+.pg-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 18px 0 12px;
+  flex-wrap: wrap;
+}
+
+.pg-tab {
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--pg-muted);
+  background: var(--pg-card);
+  border: 1px solid var(--pg-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.pg-tab[aria-selected='true'] {
+  color: #ffffff;
+  background: var(--pg-accent);
+  border-color: var(--pg-accent);
+}
+
+.pg-panel {
+  padding: 14px;
+  background: var(--pg-card);
+  border: 1px solid var(--pg-line);
+  border-radius: 10px;
+}
+
+.pg-hint {
+  margin: 0 0 12px;
+  color: var(--pg-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.pg-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.pg-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--pg-bg);
+  border: 1px solid var(--pg-line);
+  border-radius: 6px;
+}
+
+.pg-mono {
+  font-family: ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+  font-variant-ligatures: none;
+}
+
+.pg-out {
+  margin: 10px 0 0;
+  padding: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  background: var(--pg-bg);
+  border: 1px solid var(--pg-line);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

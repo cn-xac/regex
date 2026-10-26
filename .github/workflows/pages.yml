@@ -1,0 +1,78 @@
+name: Deploy playground to GitHub Pages
+
+# 触发：main 分支推东西就重建 + 发布；也可在 Actions 页手动 Run。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'playground/**'
+      - 'packages/**'
+      - 'tools/pages.mjs'
+      - '.github/workflows/pages.yml'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+  workflow_dispatch:
+
+# Pages deploy 需要 pages:write + id-token:write（OIDC attestation for deployment）
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时刻只允许一个 deploy 任务；进行中的旧任务被取消（Pages 是幂等重发）
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # 顺序：先 build 三包（core → vue/react 拓扑序），
+      # 再跑 tools/pages.mjs 走 vite 的 build API 覆盖 base 输出 pages-dist/。
+      # pages.mjs 里内嵌了「所有绝对路径必须带 /<repo>/ 前缀 + 文件必须真实存在」的零断链自检。
+      - name: Build workspace packages
+        run: pnpm build
+
+      # 三包 dist 必须真产出，否则 playground 会拿到旧/空依赖，Pages 白屏。
+      # pnpm --filter 空跑时退出码仍为 0，故此处显式校验产物。
+      - name: Verify build artifacts
+        run: node tools/verify-dist.mjs
+
+      - name: Build Pages bundle (base=/${{ github.event.repository.name }}/)
+        run: node tools/pages.mjs
+        env:
+          PAGES_REPO: ${{ github.event.repository.name }}
+
+      # setup-pages 会去查 Pages 是否开启；build_type 应该是 'workflow'
+      - uses: actions/configure-pages@v6
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: pages-dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

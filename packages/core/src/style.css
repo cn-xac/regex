@@ -1,0 +1,166 @@
+/**
+ * `@x-ac/regex-core` 的基线样式 —— 文本高亮层与结构图容器。
+ *
+ * 为什么样式放在 core 而不是适配层：高亮的**分层语义**（整段匹配 / 捕获组嵌套层 /
+ * 命名组 / 零宽匹配 / 诊断严重度）与引擎产出的 `HighlightSpan.kind` + `depth` 一一对应，
+ * 属于引擎语义的一部分。三个适配层各写一遍必然漂移，所以由 core 出一份、
+ * 消费者 `import '@x-ac/regex-core/style.css'` 即可。
+ *
+ * 类名前缀固定 `x-ac-regex-`（合集约定 `x-ac-<slug>-`）。所有色值与间距都先落成
+ * 自定义属性挂在 `.x-ac-regex-root` 上，而不是写在全局 `:root` —— 库不该污染宿主页面。
+ * 换主题只需覆盖这些变量，无需重写规则。
+ */
+
+.x-ac-regex-root {
+  --x-ac-regex-fg: #1c2430;
+  --x-ac-regex-bg: #ffffff;
+  --x-ac-regex-muted: #64748b;
+  --x-ac-regex-line: #dbe2ea;
+  --x-ac-regex-match-bg: #fff3bf;
+  --x-ac-regex-match-line: #e0a800;
+  --x-ac-regex-active-bg: #ffd54d;
+  --x-ac-regex-zero-width: #d6336c;
+  --x-ac-regex-error: #c92a2a;
+  --x-ac-regex-warning: #b8860b;
+  /* 捕获组嵌套层级色：depth 0..3 循环取用，命名组另加虚线以示区分 */
+  --x-ac-regex-group-0: #1c63b5;
+  --x-ac-regex-group-1: #2b8a3e;
+  --x-ac-regex-group-2: #6741d9;
+  --x-ac-regex-group-3: #c2410c;
+
+  color: var(--x-ac-regex-fg);
+  background: var(--x-ac-regex-bg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-color-scheme: dark) {
+  .x-ac-regex-root {
+    --x-ac-regex-fg: #e6eaf0;
+    --x-ac-regex-bg: #14181f;
+    --x-ac-regex-muted: #9aa5b4;
+    --x-ac-regex-line: #2b3240;
+    --x-ac-regex-match-bg: #4a3f10;
+    --x-ac-regex-match-line: #b58900;
+    --x-ac-regex-active-bg: #6b560f;
+    --x-ac-regex-zero-width: #f06595;
+    --x-ac-regex-error: #ff6b6b;
+    --x-ac-regex-warning: #ffd43b;
+    --x-ac-regex-group-0: #74c0fc;
+    --x-ac-regex-group-1: #69db7c;
+    --x-ac-regex-group-2: #b197fc;
+    --x-ac-regex-group-3: #ffa94d;
+  }
+}
+
+/* 代码区统一等宽；正则与文本都要按字符对齐，字体不是装饰而是正确性前提 */
+.x-ac-regex-mono {
+  font-family: ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+  font-variant-ligatures: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+
+.x-ac-regex-pattern,
+.x-ac-regex-text {
+  position: relative;
+  border: 1px solid var(--x-ac-regex-line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--x-ac-regex-bg);
+  line-height: 1.7;
+}
+
+/* 整段匹配：底色 + 下划线，二者并用以免仅靠颜色传递信息（无障碍要求） */
+.x-ac-regex-hl--match {
+  background: var(--x-ac-regex-match-bg);
+  border-bottom: 2px solid var(--x-ac-regex-match-line);
+  border-radius: 2px;
+}
+
+.x-ac-regex-hl--match.is-active {
+  background: var(--x-ac-regex-active-bg);
+  outline: 2px solid var(--x-ac-regex-match-line);
+  outline-offset: 1px;
+}
+
+/* 捕获组：按嵌套深度取色；ordinal 编号由 content 呈现，不依赖颜色可读 */
+.x-ac-regex-hl--group {
+  border-bottom: 2px solid currentColor;
+  border-radius: 2px;
+  box-shadow: inset 0 -6px 10px -8px currentColor;
+}
+
+.x-ac-regex-hl--group[data-depth='0'] { color: var(--x-ac-regex-group-0); }
+.x-ac-regex-hl--group[data-depth='1'] { color: var(--x-ac-regex-group-1); }
+.x-ac-regex-hl--group[data-depth='2'] { color: var(--x-ac-regex-group-2); }
+.x-ac-regex-hl--group[data-depth='3'] { color: var(--x-ac-regex-group-3); }
+
+.x-ac-regex-hl--named-group {
+  border-bottom-style: dashed;
+  font-weight: 600;
+}
+
+.x-ac-regex-hl__ordinal {
+  font-size: 0.62em;
+  vertical-align: super;
+  color: currentColor;
+}
+
+/* 零宽匹配没有可见跨度，必须靠独立记号画出，否则用户会以为没匹配上 */
+.x-ac-regex-hl--empty {
+  display: inline-block;
+  width: 0;
+  border-left: 2px dashed var(--x-ac-regex-zero-width);
+  margin: 0 1px;
+}
+
+/* 结构图容器：SVG 图层与 Canvas 图层叠放，两者几何一致、只切一个可见 */
+.x-ac-regex-diagram {
+  position: relative;
+  overflow: auto;
+  border: 1px solid var(--x-ac-regex-line);
+  border-radius: 6px;
+  background: var(--x-ac-regex-bg);
+  min-height: 120px;
+}
+
+.x-ac-regex-diagram__svg,
+.x-ac-regex-diagram__canvas {
+  display: block;
+  max-width: none;
+}
+
+.x-ac-regex-diagram__canvas {
+  position: absolute;
+  inset: 0;
+  touch-action: pan-x pan-y;
+}
+
+.x-ac-regex-diagram[data-backend='svg'] .x-ac-regex-diagram__canvas { visibility: hidden; }
+.x-ac-regex-diagram[data-backend='canvas'] .x-ac-regex-diagram__svg { visibility: hidden; }
+
+.x-ac-regex-diagram__empty {
+  padding: 16px;
+  color: var(--x-ac-regex-muted);
+  font-size: 13px;
+}
+
+.x-ac-regex-issue {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-left: 3px solid var(--x-ac-regex-line);
+  font-size: 13px;
+}
+
+.x-ac-regex-issue--error { border-left-color: var(--x-ac-regex-error); }
+.x-ac-regex-issue--warning { border-left-color: var(--x-ac-regex-warning); }
+
+.x-ac-regex-issue__code {
+  color: var(--x-ac-regex-muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}

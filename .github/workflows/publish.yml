@@ -1,0 +1,117 @@
+name: Publish to npm
+
+# 触发：推一个 v* tag（如 v0.1.0）即发布；也可在 Actions 页手动 Run。
+# 手动触发默认 dry_run=true —— 只跑全套门禁 + `pnpm publish --dry-run`（除上传
+# registry 外做尽一切），用来验证 workflow 本身；想借手动触发真发版必须显式勾掉。
+# tag 触发不受影响：非 dispatch 事件下 inputs.dry_run 为 null → 真 Publish 照跑。
+# 注意：npm 的 Trusted Publishing（OIDC）无法发布一个包的「第一个版本」
+# （可信发布者只能绑定到已存在的包）。因此首版必须先手工种一个占位版本
+# （本项目用 `0.0.0`，见 CONTRIBUTING「首次占位发布」），绑定 Trusted Publisher
+# 之后，正式版本（v0.1.0 起）完全由本 workflow 接管发布。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 只跑门禁与 publish --dry-run，不上传 registry
+        type: boolean
+        default: true
+        required: false
+
+# 同一时刻只允许一个发布任务，且运行中不可被取消。
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+# 最小权限：contents 只读用于检出；id-token 用于向 GitHub 申请 OIDC 令牌。
+# 刻意不声明任何 npm 相关 secrets —— 发布身份完全由 OIDC 可信发布者换取。
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # 必须与 npmjs 上「Trusted Publisher」登记的 Environment 名一致；
+    # 也要在 GitHub 仓库 Settings → Environments 里建同名环境。
+    environment: npm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm 版本由根 package.json 的 packageManager 字段决定（与本地一致）。
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      # setup-node v7 只加了 mise.toml 支持与 node-version-file 绝对路径，
+      # registry-url / cache 输入行为不变，故抬版无需改动下面的参数。
+      # registry-url 仅写入指向 npmjs 的 .npmrc（不设 NODE_AUTH_TOKEN → 纯 OIDC）。
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 全量门禁：任一包构建/测试失败都在此早停，且此时尚未产生任何对外发布。
+      # 顺序关键：build 必须先跑（pnpm -r 拓扑序：core → vue/react），
+      # 因为 vue/react 的 typecheck 与 test 都靠 `@x-ac/regex-core` 的
+      # dist/index.d.ts 来解析类型；CI 是全新 checkout，不 build 就没 dist。
+      # 本地之所以反过来也能过，是因为上一次 build 留下的 dist 还在。
+      - name: Build
+        run: pnpm build
+
+      # 产物硬校验：pnpm 的 --filter 匹配 0 个项目时退出码仍是 0（空跑），
+      # 一旦脚本写坏就会「build 绿 → 发出没有 dist 的空包」。这里改成硬失败。
+      - name: Verify build artifacts
+        run: node tools/verify-dist.mjs
+
+      - name: Typecheck & test
+        run: |
+          pnpm typecheck
+          pnpm test
+
+      # 版本一致性：tag 后缀必须等于三个公开包的 version；防手滑。
+      - name: Verify tag matches package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "workflow_dispatch 触发，跳过 tag 校验（TAG=$GITHUB_REF_NAME）"
+            exit 0
+          fi
+          CORE="$(node -p "require('./packages/core/package.json').version")"
+          VUE="$(node -p "require('./packages/vue/package.json').version")"
+          REACT="$(node -p "require('./packages/react/package.json').version")"
+          echo "tag=$TAG core=$CORE vue=$VUE react=$REACT"
+          if [ "$TAG" != "$CORE" ] || [ "$TAG" != "$VUE" ] || [ "$TAG" != "$REACT" ]; then
+            echo "::error::tag v$TAG 与三包版本 (core $CORE / vue $VUE / react $REACT) 不一致"
+            exit 1
+          fi
+
+      # 上传前预览 tarball 清单，避免误把 src/测试/lockfile 打进包。
+      - name: Preview packed contents
+        run: pnpm -r exec pnpm pack --dry-run
+
+      # 手动触发的默认路径：与真发版同一条命令，只多一个 --dry-run（除上传 registry
+      # 外做尽一切）。刻意不带 --provenance —— 来源证明要绑定真实发布，dry-run 下无意义。
+      - name: Publish (dry run)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: pnpm -r publish --access public --no-git-checks --ignore-scripts --dry-run
+
+      # --ignore-scripts：dist 已在上一步产出，跳过各包 prepublishOnly 的重复构建，
+      # 也杜绝「发布钩子递归再触发 publish」。--provenance 生成来源证明（需 public 仓库）。
+      # --no-git-checks：Actions 检出为 detached tag，关闭 pnpm 的干净工作区检查。
+      # 条件：tag 触发（inputs.dry_run 为 null → !null = true）必定执行；
+      # 手动触发只有显式勾掉 dry_run 才执行。
+      - name: Publish
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        run: pnpm -r publish --access public --provenance --no-git-checks --ignore-scripts

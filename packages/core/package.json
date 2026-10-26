@@ -1,0 +1,82 @@
+{
+  "name": "@x-ac/regex-core",
+  "version": "0.0.0",
+  "description": "Framework-agnostic regex workbench engine: safe compilation with structured issues, UTF-16 capture-group matching, DOM-free railroad/AST layout with SVG and Canvas painters, bilingual i18n (zh-CN fallback). Ships ESM, CJS, UMD and IIFE builds. 无框架依赖的正则工作台引擎，四格式产出。",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "browser": "./dist/index.iife.js",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/index.iife.js",
+  "jsdelivr": "./dist/index.iife.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./umd": "./dist/index.umd.js",
+    "./iife": "./dist/index.iife.js",
+    "./style.css": "./src/style.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "sideEffects": ["./src/style.css"],
+  "scripts": {
+    "build": "vite build --mode lib",
+    "dev": "vite build --mode lib --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vite-plugin-dts": "^5.1.2",
+    "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "regex",
+    "regular-expression",
+    "regexp",
+    "pattern",
+    "matcher",
+    "capture-group",
+    "parser",
+    "ast",
+    "railroad-diagram",
+    "syntax-diagram",
+    "svg",
+    "canvas",
+    "i18n",
+    "localization",
+    "core",
+    "typescript",
+    "esm",
+    "cjs",
+    "umd",
+    "iife",
+    "browser",
+    "h5",
+    "mobile-web",
+    "zero-dependencies",
+    "cross-framework"
+  ],
+  "license": "MIT",
+  "author": { "name": "xyj2156" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cn-xac/regex.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/cn-xac/regex/tree/main/packages/core#readme",
+  "bugs": { "url": "https://github.com/cn-xac/regex/issues" },
+  "publishConfig": { "access": "public" }
+}

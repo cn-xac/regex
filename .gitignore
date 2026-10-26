@@ -1,0 +1,24 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build artifacts
+dist/
+*.tsbuildinfo
+
+# playground / vite
+playground/dist/
+.vite/
+pages-dist/
+
+# env / editor / os
+.env
+.env.local
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# test / coverage
+coverage/

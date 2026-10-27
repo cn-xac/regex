@@ -45,6 +45,10 @@ export {
 
 export type { FlagsFailed, FlagsParsed, FlagsResult } from './flags';
 
+export { PATTERN_METACHARACTERS, escapeLiteral, escapeReplacement, unescapeLiteral } from './escape';
+
+export type { UnescapeResult } from './escape';
+
 export {
   FALLBACK_LOCALE,
   MESSAGES,

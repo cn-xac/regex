@@ -26,10 +26,13 @@ const EXPECTED_VALUE_EXPORTS = [
   'FALLBACK_LOCALE',
   'FLAG_ORDER',
   'MESSAGES',
+  'PATTERN_METACHARACTERS',
   'SUPPORTED_LOCALES',
   'checkFlagSupport',
   'createTranslator',
   'emptyFlagSet',
+  'escapeLiteral',
+  'escapeReplacement',
   'formatFlags',
   'hasFlag',
   'isFlagSupported',
@@ -38,6 +41,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'parseFlags',
   'resolveLocale',
   'translate',
+  'unescapeLiteral',
   'withFlag'
 ].sort();
 

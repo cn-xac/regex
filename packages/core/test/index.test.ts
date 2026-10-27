@@ -39,6 +39,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'normalizeFlags',
   'normalizeLocaleTag',
   'parseFlags',
+  'parsePatternInput',
   'resolveLocale',
   'translate',
   'unescapeLiteral',

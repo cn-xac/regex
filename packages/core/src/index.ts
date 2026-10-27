@@ -49,6 +49,10 @@ export { PATTERN_METACHARACTERS, escapeLiteral, escapeReplacement, unescapeLiter
 
 export type { UnescapeResult } from './escape';
 
+export { parsePatternInput } from './literal';
+
+export type { FlagsMergeStrategy, ParsedPatternInput, PatternInputOptions } from './literal';
+
 export {
   FALLBACK_LOCALE,
   MESSAGES,

@@ -34,6 +34,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'checkFlagSupport',
   'collectNodes',
   'compileCheck',
+  'computeHighlights',
   'createTranslator',
   'emptyFlagSet',
   'escapeLiteral',
@@ -54,7 +55,9 @@ const EXPECTED_VALUE_EXPORTS = [
   'renderCanvasOps',
   'renderSvg',
   'resolveLocale',
+  'spansAtOffset',
   'stringifyAst',
+  'toLineColumns',
   'translate',
   'unescapeLiteral',
   'withFlag'

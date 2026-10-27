@@ -78,6 +78,15 @@ export { applyCanvasOps, escapeXml, renderCanvasOps, renderSvg } from './painter
 
 export type { CanvasOp, PaintContext, PaintOptions, SvgTheme } from './painter';
 
+export { computeHighlights, spansAtOffset, toLineColumns } from './highlights';
+
+export type {
+  HighlightOptions,
+  HighlightSpan,
+  PositionedSpan,
+  SpanKind
+} from './highlights';
+
 export {
   FALLBACK_LOCALE,
   MESSAGES,

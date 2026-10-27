@@ -116,6 +116,15 @@ body {
   font-variant-ligatures: none;
 }
 
+/* vanilla tab 的铁路图宿主（内容来自 core 的 renderSvg） */
+.pg-diagram {
+  margin-top: 12px;
+  overflow: auto;
+  border: 1px solid var(--pg-line);
+  border-radius: 6px;
+  background: var(--pg-card);
+}
+
 .pg-out {
   margin: 10px 0 0;
   padding: 10px;

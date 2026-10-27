@@ -6,29 +6,36 @@ import {
   flagMessage,
   hasFlag,
   isFlagSupported,
+  layoutRailroad,
   parseFlags,
+  parsePattern,
   parsePatternInput,
+  renderSvg,
   resolveLocale,
   translate,
   withFlag
 } from '@x-ac/regex-core';
-import type { Locale, MessageKey, RegexFlag } from '@x-ac/regex-core';
+import type { Locale, MessageKey, RegexFlag, SvgTheme } from '@x-ac/regex-core';
 
 import '@x-ac/regex-core/style.css';
 
 /**
  * React 适配层（M3）—— 与 Vue 侧行为刻意保持一致，改动必须两边同步：
  * - pattern 输入框不篡改原文，允许 `/abc/gi` 字面量，交给 `parsePatternInput`；
- * - flags 用八个勾选控件表达，不再要求手写字符串；
- * - 检测到字面量写法时控件转为只读反映（字面量即完整表达）。
+ * - flags 用八个勾选控件表达；
+ * - 铁路图由 core 的 `parsePattern → layoutRailroad → renderSvg` 产出字符串，
+ *   这里只负责挂载；Canvas 后端与 SVG 共用同一份几何。
  *
- * M4/M5 挂匹配高亮与 `x-ac-regex-diagram` 的 SVG / Canvas 双后端。
+ * 关于 `dangerouslySetInnerHTML`：内容全部来自 `renderSvg`，其中每个 label 都过了
+ * `escapeXml`，不含用户可注入的原始标记。
  */
 export interface RegexProps {
   pattern?: string;
   flags?: string;
   /** 语言候选（宿主传 `[...navigator.languages]`）；core 不读 navigator，故在此注入。 */
   localeCandidates?: readonly string[];
+  /** 导出的 SVG 配色。宿主想跟随系统时自行传值（core 不读 matchMedia）。 */
+  svgTheme?: SvgTheme;
   onPatternChange?: (value: string) => void;
   onFlagsChange?: (value: string) => void;
 }
@@ -41,6 +48,7 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
     pattern = '',
     flags = 'g',
     localeCandidates = [],
+    svgTheme = 'light',
     onPatternChange,
     onFlagsChange
   } = props;
@@ -75,11 +83,17 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
     [source, flagsModel, isLiteral]
   );
 
-  /** 勾选态自身也可能冲突（同时勾了 u 与 v），单独校验后一并显示。 */
   const issues = useMemo(
     () => [...parsed.issues, ...parseFlags(parsed.flags).issues],
     [parsed]
   );
+
+  /** 铁路图 SVG。pattern 非法（或被复验拒绝）时为空串，界面退回占位提示。 */
+  const diagram = useMemo<string>(() => {
+    const result = parsePattern(parsed.pattern, parsed.flags);
+    if (!result.ok) return '';
+    return renderSvg(layoutRailroad(result.ast), { theme: svgTheme });
+  }, [parsed, svgTheme]);
 
   const onSourceInput = useCallback(
     (event: ChangeEvent<HTMLInputElement>): void => {
@@ -159,8 +173,15 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
         </ul>
       ) : null}
 
-      <div className="x-ac-regex-diagram">
-        <p className="x-ac-regex-diagram__empty">{t('view.emptyDiagram')}</p>
+      <div className="x-ac-regex-diagram" data-backend="svg">
+        {diagram === '' ? (
+          <p className="x-ac-regex-diagram__empty">{t('view.emptyDiagram')}</p>
+        ) : (
+          <div
+            className="x-ac-regex-diagram__svg-host"
+            dangerouslySetInnerHTML={{ __html: diagram }}
+          />
+        )}
       </div>
     </div>
   );

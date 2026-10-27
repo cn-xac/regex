@@ -6,47 +6,10 @@
 export { Regex } from './Regex';
 export type { RegexHandle, RegexProps } from './Regex';
 
-export {
-  CORE_VERSION,
-  FALLBACK_LOCALE,
-  FLAG_ORDER,
-  MESSAGES,
-  PATTERN_METACHARACTERS,
-  SUPPORTED_LOCALES,
-  checkFlagSupport,
-  createTranslator,
-  emptyFlagSet,
-  escapeLiteral,
-  escapeReplacement,
-  flagMessage,
-  formatFlags,
-  hasFlag,
-  isFlagSupported,
-  normalizeFlags,
-  normalizeLocaleTag,
-  parseFlags,
-  parsePatternInput,
-  resolveLocale,
-  translate,
-  unescapeLiteral,
-  withFlag
-} from '@x-ac/regex-core';
+/**
+ * 引擎能力整体透传，**不重复维护一份名单** —— 适配层另抄一份导出清单必然会与 core
+ * 漂移（漏一个就逼用户去装 core）。导出面是否完整由 core 的 `test/index.test.ts`
+ * 快照断言守住，比在这里再列一遍更有效。
+ */
+export * from '@x-ac/regex-core';
 
-export type {
-  FlagSet,
-  FlagsFailed,
-  FlagsMergeStrategy,
-  FlagsParsed,
-  FlagsResult,
-  IssueCode,
-  IssueSeverity,
-  Locale,
-  MessageKey,
-  ParsedPatternInput,
-  PatternInputOptions,
-  RegexFlag,
-  RegexIssue,
-  SourceRange,
-  TranslateParams,
-  UnescapeResult
-} from '@x-ac/regex-core';

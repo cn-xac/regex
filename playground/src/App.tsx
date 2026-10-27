@@ -4,7 +4,15 @@ import type { JSX } from 'react';
 import { createApp } from 'vue';
 import type { App as VueAppInstance } from 'vue';
 
-import { normalizeFlags, parseFlags, resolveLocale, translate } from '@x-ac/regex-core';
+import {
+  layoutRailroad,
+  normalizeFlags,
+  parseFlags,
+  parsePattern,
+  renderSvg,
+  resolveLocale,
+  translate
+} from '@x-ac/regex-core';
 import type { MessageKey } from '@x-ac/regex-core';
 import { Regex as RegexReact } from '@x-ac/regex-react';
 import { Regex as RegexVue } from '@x-ac/regex-vue';
@@ -43,6 +51,7 @@ const TABS: readonly { id: TabId; label: string }[] = [
 
 function VanillaPanel({ candidates }: { candidates: readonly string[] }): JSX.Element {
   const outRef = useRef<HTMLPreElement | null>(null);
+  const svgRef = useRef<HTMLDivElement | null>(null);
   const [pattern, setPattern] = useState<string>(DEMO_PATTERN);
   const [flags, setFlags] = useState<string>(DEMO_FLAGS);
 
@@ -63,6 +72,14 @@ function VanillaPanel({ candidates }: { candidates: readonly string[] }): JSX.El
     ];
     out.textContent = lines.join('\n');
   }, [candidates, pattern, flags]);
+
+  // 无框架出图：core 产 SVG 字符串，这里只是 innerHTML 一行的事。
+  useEffect(() => {
+    const host = svgRef.current;
+    if (host === null) return;
+    const result = parsePattern(pattern, normalizeFlags(flags));
+    host.innerHTML = result.ok ? renderSvg(layoutRailroad(result.ast)) : '';
+  }, [pattern, flags]);
 
   return (
     <section className="pg-panel">
@@ -88,6 +105,7 @@ function VanillaPanel({ candidates }: { candidates: readonly string[] }): JSX.El
         />
       </label>
       <pre ref={outRef} className="pg-out pg-mono" />
+      <div ref={svgRef} className="pg-diagram" />
     </section>
   );
 }

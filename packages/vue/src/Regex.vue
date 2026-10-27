@@ -2,13 +2,14 @@
 /**
  * Vue 3 适配层（M3）。
  *
- * 仍然薄：只做「输入控件 ↔ core 纯函数」的搬运，不含任何正则语义。
- * - pattern 输入框**不篡改**用户原文，允许写 `/abc/gi` 字面量，由 `parsePatternInput` 解析；
- * - flags 用八个勾选控件表达（i / g / m …），不再要求用户手写字符串；
- * - 一旦检测到字面量写法，勾选控件转为**只读反映**，避免「点了没反应」的矛盾状态 ——
- *   字面量本身就是一个完整表达。
+ * 仍然薄：只做「输入控件 ↔ core 纯函数」的搬运，不含任何正则语义与布局算法。
+ * - pattern 输入框**不篡改**用户原文，允许写 `/abc/gi`，由 `parsePatternInput` 解析；
+ * - flags 用八个勾选控件表达；
+ * - 铁路图由 core 的 `parsePattern → layoutRailroad → renderSvg` 产出**字符串**，
+ *   这里只负责挂进 DOM。坐标与配色全在 core，Canvas 后端共用同一份几何。
  *
- * M4/M5 在此挂上匹配高亮与 `x-ac-regex-diagram` 的 SVG / Canvas 双后端。
+ * 关于 `v-html`：内容全部来自 `renderSvg`，其中每个 label 都过了 `escapeXml`，
+ * 不含任何用户可注入的原始标记；这是本项目里唯一使用 v-html 的地方。
  */
 import { computed, ref, watch } from 'vue';
 import {
@@ -16,13 +17,16 @@ import {
   flagMessage,
   hasFlag,
   isFlagSupported,
+  layoutRailroad,
   parseFlags,
+  parsePattern,
   parsePatternInput,
+  renderSvg,
   resolveLocale,
   translate,
   withFlag
 } from '@x-ac/regex-core';
-import type { Locale, MessageKey, RegexFlag } from '@x-ac/regex-core';
+import type { Locale, MessageKey, RegexFlag, SvgTheme } from '@x-ac/regex-core';
 import '@x-ac/regex-core/style.css';
 
 const props = withDefaults(
@@ -31,8 +35,10 @@ const props = withDefaults(
     flags?: string;
     /** 语言候选（宿主传 `[...navigator.languages]`）；core 不读 navigator，故在此注入。 */
     localeCandidates?: readonly string[];
+    /** 导出的 SVG 配色。宿主想跟随系统时自行传值（core 不读 matchMedia）。 */
+    svgTheme?: SvgTheme;
   }>(),
-  { pattern: '', flags: 'g', localeCandidates: () => [] }
+  { pattern: '', flags: 'g', localeCandidates: () => [], svgTheme: 'light' }
 );
 
 const emit = defineEmits<{
@@ -43,9 +49,7 @@ const emit = defineEmits<{
 const locale = computed<Locale>(() => resolveLocale(props.localeCandidates));
 const t = (key: MessageKey): string => translate(locale.value, key);
 
-/** 输入框原文（可能是字面量写法），保持用户输入不被改写。 */
 const source = ref<string>(props.pattern);
-/** 勾选态 flags。 */
 const flagsModel = ref<string>(props.flags);
 
 watch(
@@ -71,8 +75,14 @@ const parsed = computed(() =>
   })
 );
 
-/** 勾选态自身也可能冲突（同时勾了 u 与 v），单独校验后一并显示。 */
 const issues = computed(() => [...parsed.value.issues, ...parseFlags(parsed.value.flags).issues]);
+
+/** 铁路图 SVG。pattern 非法（或被复验拒绝）时为空串，界面退回占位提示。 */
+const diagram = computed<string>(() => {
+  const result = parsePattern(parsed.value.pattern, parsed.value.flags);
+  if (!result.ok) return '';
+  return renderSvg(layoutRailroad(result.ast), { theme: props.svgTheme });
+});
 
 function onSourceInput(event: Event): void {
   const target = event.target as HTMLInputElement | null;
@@ -143,8 +153,10 @@ function toggleFlag(flag: RegexFlag): void {
       </li>
     </ul>
 
-    <div class="x-ac-regex-diagram">
-      <p class="x-ac-regex-diagram__empty">{{ t('view.emptyDiagram') }}</p>
+    <div class="x-ac-regex-diagram" data-backend="svg">
+      <!-- eslint-disable-next-line vue/html-self-closing -->
+      <div v-if="diagram" class="x-ac-regex-diagram__svg-host" v-html="diagram"></div>
+      <p v-else class="x-ac-regex-diagram__empty">{{ t('view.emptyDiagram') }}</p>
     </div>
   </div>
 </template>

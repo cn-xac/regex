@@ -70,6 +70,14 @@ export { collectNodes, nodeRange, parsePattern, stringifyAst } from './parser';
 
 export type { AstNode, AstNodeKind, GroupKind, ParseResult, Quantifier } from './parser';
 
+export { DEFAULT_METRICS, layoutRailroad } from './layout';
+
+export type { BoxTone, Diagram, DiagramBox, DiagramEdge, DiagramMetrics } from './layout';
+
+export { applyCanvasOps, escapeXml, renderCanvasOps, renderSvg } from './painter';
+
+export type { CanvasOp, PaintContext, PaintOptions, SvgTheme } from './painter';
+
 export {
   FALLBACK_LOCALE,
   MESSAGES,

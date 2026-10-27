@@ -132,6 +132,51 @@ describe('layout 不变量', () => {
     expect(xs).toEqual(sorted);
   });
 
+  /**
+   * 垂直基线不变量：同一序列里的主体盒子必须共用一条水平中线。
+   * 这条断言就是预览图「上下错位」的捕获者 —— 无论错因是逐步抬高 height，
+   * 还是标签占了垂直分配空间，它都会红。
+   */
+  it('同一序列内的主体盒子垂直中心一致（基线对齐）', () => {
+    const LEAF: readonly string[] = ['literal', 'escape', 'dot', 'characterClass', 'backreference', 'anchor'];
+    for (const pattern of ['abcdef', '\\d+abc', 'a(b)c', '(?<x>a)b', '[a-z]+\\d', '(a)(b)(c)']) {
+      const centers = new Set(
+        diagramFor(pattern)
+          .boxes.filter((b) => LEAF.includes(b.tone))
+          .map((b) => Math.round((b.y + b.h / 2) * 100) / 100)
+      );
+      expect([...centers], `pattern=${pattern} 主体中心分散`).toHaveLength(1);
+    }
+  });
+
+  it('交替的入口与出口汇聚在同一条水平中线上', () => {
+    for (const pattern of ['a|bb|ccc', '(?:x|y)+']) {
+      const d = diagramFor(pattern);
+      const spineYs = d.edges
+        .filter((e) => e.id.includes('.in') || e.id.includes('.out'))
+        .map((e) => (e.id.includes('.in') ? e.from.y : e.to.y));
+      expect(spineYs.length).toBeGreaterThan(0);
+      expect(new Set(spineYs).size, `pattern=${pattern}`).toBe(1);
+    }
+  });
+
+  it('量词与组前缀标签悬浮在主体上方，不压低主体基线', () => {
+    const bare = diagramFor('ab');
+    const quantified = diagramFor('a+b');
+    const center = (d: Diagram, label: string): number => {
+      const box = d.boxes.find((b) => b.label === label);
+      return box === undefined ? Number.NaN : Math.round((box.y + box.h / 2) * 100) / 100;
+    };
+    expect(center(quantified, 'b')).toBe(center(quantified, 'a'));
+    // 跨图比绝对中心无意义（末尾按 bbox 统一平移，有标签的图整体更高）；
+    // 有意义的断言是：标签确实要画布空间，但不改变图内的基线对齐（上一条）。
+    expect(quantified.height).toBeGreaterThan(bare.height);
+    expect(center(bare, 'a')).toBe(center(bare, 'b'));
+    const tag = quantified.boxes.find((b) => b.tone === 'tagQuantifier');
+    const body = quantified.boxes.find((b) => b.label === 'a');
+    expect(tag !== undefined && body !== undefined && tag.y < body.y).toBe(true);
+  });
+
   it('量词与组前缀各自产出标签盒', () => {
     const d = diagramFor('\\d{2,}');
     expect(d.boxes.some((b) => b.tone === 'tagQuantifier' && b.label === '{2,}')).toBe(true);
@@ -172,6 +217,16 @@ describe('SVG painter', () => {
     expect(svg).toMatch(/data-start="\d+" data-end="\d+"/);
   });
 
+  it('SVG 文本落在盒子中心并交给 dominant-baseline，不叠加半个字号位移', () => {
+    const d = diagramFor('abc');
+    const svg = renderSvg(d, { fontSize: 20 });
+    expect(svg).toContain('dominant-baseline="central"');
+    for (const box of d.boxes.filter((b) => b.label !== '')) {
+      const center = Math.round((box.y + box.h / 2) * 100) / 100;
+      expect(svg).toContain(`y="${center}"`);
+    }
+  });
+
   it('两次渲染字符串完全相同，且深浅色版不同', () => {
     const d = diagramFor('\\d+');
     expect(renderSvg(d)).toBe(renderSvg(d));
@@ -185,6 +240,7 @@ describe('Canvas painter', () => {
     'setFill',
     'setLineWidth',
     'setFont',
+    'setTextBaseline',
     'strokeRect',
     'fillText',
     'beginPath',
@@ -218,6 +274,7 @@ describe('Canvas painter', () => {
       fillStyle: '',
       lineWidth: 0,
       font: '',
+      textBaseline: '',
       strokeRect: () => calls.push('strokeRect'),
       fillText: (text) => {
         calls.push('fillText');

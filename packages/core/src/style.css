@@ -137,10 +137,6 @@
   display: block;
 }
 
-.x-ac-regex-diagram__svg-host text {
-  dominant-baseline: middle;
-}
-
 .x-ac-regex-node {
   cursor: default;
 }

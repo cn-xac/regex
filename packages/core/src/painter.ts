@@ -79,6 +79,11 @@ function fontSizeOf(options: PaintOptions): number {
   return options.fontSize ?? 13;
 }
 
+/** 标签类盒子不画框，只写字。 */
+function isTagTone(tone: BoxTone): boolean {
+  return tone === 'tagQuantifier' || tone === 'tagGroupPrefix';
+}
+
 /**
  * 铁路图 → SVG 标记字符串。
  *
@@ -110,23 +115,26 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
   parts.push(`<g class="x-ac-regex-diagram__boxes" font-family="${escapeXml(font)}" font-size="${size}">`);
   for (const box of diagram.boxes) {
     const paint = colors[box.tone];
+    const tag = isTagTone(box.tone);
     const attrs = box.source === undefined ? '' : ` data-start="${box.source.start}" data-end="${box.source.end}"`;
     parts.push(
       `<g class="x-ac-regex-node x-ac-regex-node--${box.tone}" data-id="${escapeXml(box.id)}"` +
         ` data-tone="${box.tone}" data-depth="${box.depth}"${attrs}>`
     );
-    if (box.tone !== 'tagQuantifier' && box.tone !== 'tagGroupPrefix') {
+    if (!tag) {
       parts.push(
         `<rect x="${round(box.x)}" y="${round(box.y)}" width="${round(box.w)}" height="${round(box.h)}"` +
           ` rx="4" fill="${paint.fill}" stroke="${paint.stroke}"/>`
       );
     }
     if (box.label !== '') {
-      // 文本垂直居中：等宽字体下按基线偏移近似
-      const baseline = round(box.y + box.h / 2 + size * 0.35);
+      // 垂直居中只做一次：交给 dominant-baseline，不再叠加半个字号的位移。
+      // 之前这里既加 size*0.35 又在 style.css 里写 dominant-baseline: middle，
+      // 两者叠成就成了「文字整体偏下」。
       parts.push(
-        `<text x="${round(box.x + (box.tone === 'tagQuantifier' || box.tone === 'tagGroupPrefix' ? 0 : 6))}"` +
-          ` y="${baseline}" fill="${paint.text}">${escapeXml(box.label)}</text>`
+        `<text x="${round(box.x + (tag ? 0 : 6))}" y="${round(box.y + box.h / 2)}"` +
+          ` dominant-baseline="central" text-anchor="start" fill="${paint.text}">` +
+          `${escapeXml(box.label)}</text>`
       );
     }
     parts.push('</g>');
@@ -142,6 +150,7 @@ export type CanvasOp =
   | { readonly kind: 'setFill'; readonly value: string }
   | { readonly kind: 'setLineWidth'; readonly value: number }
   | { readonly kind: 'setFont'; readonly value: string }
+  | { readonly kind: 'setTextBaseline'; readonly value: string }
   | { readonly kind: 'strokeRect'; readonly x: number; readonly y: number; readonly w: number; readonly h: number }
   | { readonly kind: 'fillText'; readonly text: string; readonly x: number; readonly y: number }
   | { readonly kind: 'beginPath' }
@@ -167,11 +176,15 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
   }
   ops.push({ kind: 'stroke' });
 
-  ops.push({ kind: 'setFont', value: `${size}px ${font}` });
+  ops.push(
+    { kind: 'setFont', value: `${size}px ${font}` },
+    // 与 SVG 后端同一套居中口径：由 baseline 负责，不叠加半个字号位移
+    { kind: 'setTextBaseline', value: 'middle' }
+  );
   for (const box of diagram.boxes) {
     const paint = colors[box.tone];
-    const isTag = box.tone === 'tagQuantifier' || box.tone === 'tagGroupPrefix';
-    if (!isTag) {
+    const tag = isTagTone(box.tone);
+    if (!tag) {
       ops.push({ kind: 'setFill', value: paint.fill }, { kind: 'setStroke', value: paint.stroke });
       ops.push({ kind: 'strokeRect', x: round(box.x), y: round(box.y), w: round(box.w), h: round(box.h) });
     }
@@ -180,8 +193,8 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
       ops.push({
         kind: 'fillText',
         text: box.label,
-        x: round(box.x + (isTag ? 0 : 6)),
-        y: round(box.y + box.h / 2 + size * 0.35)
+        x: round(box.x + (tag ? 0 : 6)),
+        y: round(box.y + box.h / 2)
       });
     }
   }
@@ -198,6 +211,7 @@ export interface PaintContext {
   fillStyle: string;
   lineWidth: number;
   font: string;
+  textBaseline: string;
   strokeRect(x: number, y: number, w: number, h: number): void;
   fillText(text: string, x: number, y: number): void;
   beginPath(): void;
@@ -220,6 +234,9 @@ export function applyCanvasOps(ops: readonly CanvasOp[], ctx: PaintContext): voi
         break;
       case 'setFont':
         ctx.font = op.value;
+        break;
+      case 'setTextBaseline':
+        ctx.textBaseline = op.value;
         break;
       case 'strokeRect':
         ctx.strokeRect(op.x, op.y, op.w, op.h);

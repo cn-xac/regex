@@ -150,28 +150,25 @@ function place(node: AstNode, idPath: string, depth: number, m: DiagramMetrics):
       const inner = place(node.children[0] as AstNode, `${idPath}.0`, depth, m);
       const tag = node.quantifier?.source ?? '';
       const tagW = leafWidth(tag, m);
+      const tagH = m.leafHeight * 0.7;
+      const tagY = -tagH - m.padY / 2;
       const boxes: DiagramBox[] = [
         ...inner.boxes,
         {
           id: `${idPath}.q`,
           x: inner.width - tagW,
-          y: -m.leafHeight - 2,
+          y: tagY,
           w: tagW,
-          h: m.leafHeight * 0.7,
+          h: tagH,
           label: tag,
           tone: 'tagQuantifier',
           source: { start: node.start, end: node.end },
           depth
         }
       ];
-      // 量化对象上方留出标签空间
-      const top = -m.leafHeight - 2 - m.padY;
-      return {
-        boxes,
-        edges: inner.edges,
-        width: Math.max(inner.width, tagW),
-        height: inner.height - Math.min(top, 0)
-      };
+      // 主体高度即返回高度：标签**悬浮**在上方（负 y，由 layoutRailroad 末尾统一平移），
+      // 不占垂直分配。否则量词会把主体推离基线，与相邻无量化元素混排时必然错位。
+      return { boxes, edges: inner.edges, width: Math.max(inner.width, tagW), height: inner.height };
     }
     case 'group': {
       const inner = place(node.children[0] as AstNode, `${idPath}.0`, depth + 1, m);
@@ -180,14 +177,16 @@ function place(node: AstNode, idPath: string, depth: number, m: DiagramMetrics):
       const pad = m.padX + 6;
       const label =
         kind === 'named' ? `(?<${node.name ?? ''}>` : kind === 'capturing' ? `(${node.ordinal ?? ''})` : groupTag(kind);
-      const innerTop = isAssertion ? 0 : m.lineHeight + m.padY;
+      const tagH = m.lineHeight;
+      const tagY = -tagH - m.padY / 2;
       const boxes: DiagramBox[] = [
         {
           id: idPath,
           x: 0,
-          y: 0,
+          // 容器向上扩出前缀标签的空间，主体仍落在 0..inner.height
+          y: tagY - m.padY / 2,
           w: inner.width + pad * 2,
-          h: innerTop + inner.height + m.padY,
+          h: -tagY + m.padY / 2 + inner.height + m.padY / 2,
           label: '',
           tone: isAssertion ? 'assertion' : 'group',
           source: { start: node.start, end: node.end },
@@ -196,20 +195,20 @@ function place(node: AstNode, idPath: string, depth: number, m: DiagramMetrics):
         {
           id: `${idPath}.p`,
           x: pad,
-          y: m.padY / 2,
+          y: tagY,
           w: leafWidth(label, m),
-          h: m.lineHeight,
+          h: tagH,
           label,
           tone: 'tagGroupPrefix',
           source: { start: node.start, end: node.end },
           depth
         },
-        ...shift(inner.boxes, pad, innerTop)
+        ...shift(inner.boxes, pad, 0)
       ];
       // group 的进出连线由外层 sequence 统一处理，这里只搬运内层边 ——
       // 不要在这里补占位边（曾有一条 from===to 的零长度线，纯噪音）。
-      const edges: DiagramEdge[] = [...shiftEdges(inner.edges, pad, innerTop)];
-      return { boxes, edges, width: inner.width + pad * 2, height: innerTop + inner.height + m.padY };
+      const edges: DiagramEdge[] = [...shiftEdges(inner.edges, pad, 0)];
+      return { boxes, edges, width: inner.width + pad * 2, height: inner.height };
     }
     default: {
       const { label, tone } = leafLabel(node);
@@ -239,25 +238,25 @@ function place(node: AstNode, idPath: string, depth: number, m: DiagramMetrics):
 function placeSequence(node: AstNode, idPath: string, depth: number, m: DiagramMetrics): Placed {
   const boxes: DiagramBox[] = [];
   const edges: DiagramEdge[] = [];
-  let x = 0;
-  let height = m.leafHeight;
-  let prevBottomY = m.leafHeight / 2;
+  const placed = node.children.map((child, i) => place(child, `${idPath}.${i}`, depth, m));
 
-  node.children.forEach((child, i) => {
-    const placed = place(child, `${idPath}.${i}`, depth, m);
-    const offsetY = Math.round((height - placed.height) / 2);
-    boxes.push(...shift(placed.boxes, x, offsetY));
-    edges.push(...shiftEdges(placed.edges, x, offsetY));
+  // 必须先量完所有子项再居中：早先版本在循环里边推进边抬高 height，
+  // 导致序列越往右的盒子基准越高 —— 表现为整条链「上下错位」。
+  const height = placed.reduce((max, p) => Math.max(max, p.height), m.leafHeight);
+
+  let x = 0;
+  placed.forEach((p, i) => {
+    const offsetY = Math.round((height - p.height) / 2);
+    boxes.push(...shift(p.boxes, x, offsetY));
+    edges.push(...shiftEdges(p.edges, x, offsetY));
     if (i > 0) {
       edges.push({
         id: `${idPath}.c${i}`,
-        from: { x: x - m.gapX, y: prevBottomY },
-        to: { x, y: offsetY + placed.height / 2 }
+        from: { x: x - m.gapX, y: height / 2 },
+        to: { x, y: offsetY + p.height / 2 }
       });
     }
-    x += placed.width + m.gapX;
-    height = Math.max(height, placed.height);
-    prevBottomY = offsetY + placed.height / 2;
+    x += p.width + m.gapX;
   });
 
   return { boxes, edges, width: Math.max(0, x - m.gapX), height };
@@ -266,27 +265,32 @@ function placeSequence(node: AstNode, idPath: string, depth: number, m: DiagramM
 function placeChoice(node: AstNode, idPath: string, depth: number, m: DiagramMetrics): Placed {
   const boxes: DiagramBox[] = [];
   const edges: DiagramEdge[] = [];
-  let width = 0;
-  let y = 0;
   const branches = node.children.map((child, i) => place(child, `${idPath}.${i}`, depth, m));
+  const width = branches.reduce((max, b) => Math.max(max, b.width), 0);
+  const totalHeight =
+    branches.reduce((sum, b) => sum + b.height, 0) + m.gapY * Math.max(0, branches.length - 1);
+  const spineY = totalHeight / 2; // 汇聚中线：分支可能比 leafHeight 高，不能用它当中线
 
-  for (const branch of branches) width = Math.max(width, branch.width);
-
+  let y = 0;
   branches.forEach((branch, i) => {
-    const offsetY = y + Math.round((m.leafHeight - branch.height) / 2);
-    boxes.push(...shift(branch.boxes, m.gapX, offsetY));
-    edges.push(...shiftEdges(branch.edges, m.gapX, offsetY));
-    const midY = offsetY + branch.height / 2;
-    edges.push({ id: `${idPath}.in${i}`, from: { x: 0, y: m.leafHeight / 2 }, to: { x: m.gapX, y: midY } });
+    boxes.push(...shift(branch.boxes, m.gapX, y));
+    edges.push(...shiftEdges(branch.edges, m.gapX, y));
+    const midY = y + branch.height / 2;
+    edges.push({ id: `${idPath}.in${i}`, from: { x: 0, y: spineY }, to: { x: m.gapX, y: midY } });
     edges.push({
       id: `${idPath}.out${i}`,
       from: { x: m.gapX + branch.width, y: midY },
-      to: { x: width + m.gapX * 2, y: m.leafHeight / 2 }
+      to: { x: width + m.gapX * 2, y: spineY }
     });
     y += branch.height + m.gapY;
   });
 
-  return { boxes, edges, width: width + m.gapX * 2, height: Math.max(m.leafHeight, y - m.gapY) };
+  return {
+    boxes,
+    edges,
+    width: width + m.gapX * 2,
+    height: Math.max(m.leafHeight, totalHeight)
+  };
 }
 
 function shift(boxes: readonly DiagramBox[], dx: number, dy: number): DiagramBox[] {

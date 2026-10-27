@@ -108,8 +108,22 @@ function bare(boxes: DiagramBox[], edges: DiagramEdge[], width: number, height: 
   return { boxes, edges, width, height, above: 0, below: 0 };
 }
 
+/**
+ * 文字宽度估算。**必须区分 CJK 双宽**：早先一律按 charWidth 估，中文标签（如
+ * 「0次以上·非贪婪」）被低估约 40%，文字直接溢出 viewBox 被裁掉尾部。
+ * 这里按「码位 > U+2E7F 记 2 个单位」粗判宽字符，够排版用且无需测量 DOM。
+ */
+function textUnits(label: string): number {
+  let units = 0;
+  for (const ch of label) {
+    const cp = ch.codePointAt(0) ?? 0;
+    units += cp > 0x2e7f ? 2 : 1;
+  }
+  return units;
+}
+
 function leafWidth(label: string, m: DiagramMetrics): number {
-  return Math.max(m.minWidth, label.length * m.charWidth + m.padX * 2);
+  return Math.max(m.minWidth, textUnits(label) * m.charWidth + m.padX * 2);
 }
 
 /** 分组的框上标签：捕获组带 `#N`，非捕获与断言明确不带编号。 */
@@ -239,11 +253,12 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
 
       let labelW = 0;
       if (label !== '') {
-        labelW = label.length * m.charWidth;
+        labelW = textUnits(label) * m.charWidth;
+        // 标签比被包元素宽时居中于**总宽**，否则会从左侧溢出被 viewBox 裁掉
         boxes.push(
           box(
             `${idPath}.q`,
-            (right - labelW) / 2,
+            (Math.max(right, labelW) - labelW) / 2,
             topY - m.lineHeight,
             labelW,
             m.lineHeight,
@@ -264,6 +279,9 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
         edges.push({ id: `${idPath}.s1`, from: { x: left, y: frameBottom }, to: { x: left, y: sy } });
         edges.push({ id: `${idPath}.s2`, from: { x: left, y: sy }, to: { x: right, y: sy } });
         edges.push({ id: `${idPath}.s3`, from: { x: right, y: sy }, to: { x: right, y: frameBottom } });
+        // 旁路也要有箭头，否则那条 U 形线读起来像「框的残影」，看不出是跳过路径
+        edges.push({ id: `${idPath}.sh1`, from: { x: right - ah * 2, y: sy - ah }, to: { x: right - ah, y: sy } });
+        edges.push({ id: `${idPath}.sh2`, from: { x: right - ah * 2, y: sy + ah }, to: { x: right - ah, y: sy } });
         below = skipDepth;
       }
 

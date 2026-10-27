@@ -253,6 +253,18 @@ describe('layout 不变量', () => {
     expect(prefix !== undefined && prefix.y <= Math.min(...arc.map((e) => Math.min(e.from.y, e.to.y)))).toBe(true);
   });
 
+  it('中文标签按双宽计宽且不左溢，旁路弧带箭头', () => {
+    const tag = boxesOf('a+?').find((b) => b.tone === 'tagQuantifier');
+    if (tag === undefined) throw new Error('缺次数标签');
+    // 「一次以上·非贪婪」为宽字符，按双宽算至少 15 个单位；旧实现按 1 倍估 → 文字溢出被裁
+    expect(tag.w).toBeGreaterThanOrEqual(14 * DEFAULT_METRICS.charWidth);
+    expect(tag.x).toBeGreaterThanOrEqual(0);
+    // 旁路弧必须带箭头，否则那条 U 形线读起来像框的残影
+    expect(boxesOf('a*').length).toBeGreaterThan(0);
+    expect(diagramFor('a*').edges.filter((e) => e.id.includes('.sh')).length).toBe(2);
+    expect(diagramFor('a+').edges.filter((e) => e.id.includes('.sh'))).toHaveLength(0);
+  });
+
   /** 使用者反馈 4：内容与分组框之间留白，且内容在内容区垂直居中。 */
   it('组内容四周留白、左右对称，且不与标签重叠', () => {
     const boxes = boxesOf('(?<x>ab)');

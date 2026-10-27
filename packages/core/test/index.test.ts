@@ -33,6 +33,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'emptyFlagSet',
   'escapeLiteral',
   'escapeReplacement',
+  'flagMessage',
   'formatFlags',
   'hasFlag',
   'isFlagSupported',

@@ -164,3 +164,53 @@
   font-size: 11px;
   letter-spacing: 0.02em;
 }
+
+/* flags 勾选组：八个 flag 一律以控件呈现，不要求用户手写字符串 */
+.x-ac-regex-flags {
+  margin: 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--x-ac-regex-line);
+  border-radius: 6px;
+}
+
+.x-ac-regex-flags[aria-disabled='true'] {
+  opacity: 0.6;
+}
+
+.x-ac-regex-flags legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--x-ac-regex-muted);
+}
+
+.x-ac-regex-flag {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.x-ac-regex-flag.is-unsupported {
+  cursor: not-allowed;
+  color: var(--x-ac-regex-muted);
+  text-decoration: line-through;
+}
+
+.x-ac-regex-flag__code {
+  min-width: 2.4em;
+  font-family: ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+  font-weight: 600;
+}
+
+.x-ac-regex-flag__hint {
+  color: var(--x-ac-regex-muted);
+  font-size: 12px;
+}
+
+.x-ac-regex-note {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--x-ac-regex-muted);
+}

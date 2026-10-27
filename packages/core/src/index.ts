@@ -58,6 +58,7 @@ export {
   MESSAGES,
   SUPPORTED_LOCALES,
   createTranslator,
+  flagMessage,
   normalizeLocaleTag,
   resolveLocale,
   translate

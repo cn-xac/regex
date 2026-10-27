@@ -18,6 +18,8 @@
  * 少写任意一种语言的任意一个 key 都会**编译失败**，比运行时审计更早发现问题。
  */
 
+import type { RegexFlag } from './types';
+
 export type Locale = 'zh-CN' | 'en';
 
 /** 未命中任何受支持语言时的回退（合集约定：简体中文）。 */
@@ -49,6 +51,8 @@ export type MessageKey =
   | 'view.emptyDiagram'
   | 'view.truncated'
   | 'view.matchCount'
+  | 'view.normalized'
+  | 'note.flagsFromLiteral'
   // 八个 flag 的含义
   | 'flag.d'
   | 'flag.g'
@@ -106,6 +110,9 @@ const ZH: Record<MessageKey, string> = {
   'view.emptyDiagram': '输入有效的正则表达式后显示结构图',
   'view.truncated': '结果已达上限并被截断，可能还有更多匹配',
   'view.matchCount': '共 {count} 个匹配',
+  'view.normalized': '规范化后',
+  'note.flagsFromLiteral':
+    '检测到 /…/flags 字面量写法，修饰符以字面量为准；去掉首尾斜杠即可用下面的控件勾选。',
   'flag.d': '为捕获组暴露索引（有命名组时隐含启用）',
   'flag.g': '全局搜索，找出所有匹配',
   'flag.i': '忽略大小写',
@@ -161,6 +168,9 @@ const EN: Record<MessageKey, string> = {
   'view.emptyDiagram': 'Enter a valid pattern to see its structure',
   'view.truncated': 'Results hit the limit and were truncated; more matches may exist',
   'view.matchCount': '{count} matches',
+  'view.normalized': 'Normalized',
+  'note.flagsFromLiteral':
+    'A /…/flags literal was detected, so flags come from the literal; drop the surrounding slashes to edit them with the controls below.',
   'flag.d': 'Expose capture group indices (implied by named groups)',
   'flag.g': 'Global search, find all matches',
   'flag.i': 'Case-insensitive',
@@ -255,4 +265,15 @@ export function translate(locale: Locale, key: MessageKey, params?: TranslatePar
 /** 便捷闭包：绑定语言后直接 `t(key, params)`，适配层与 playground 用它避免每处传 locale。 */
 export function createTranslator(locale: Locale): (key: MessageKey, params?: TranslateParams) => string {
   return (key: MessageKey, params?: TranslateParams): string => translate(locale, key, params);
+}
+
+/**
+ * 取某个 flag 的说明文案（`flag.d` … `flag.v`）。
+ *
+ * 存在的理由是把 `'flag.' + flag` 到 `MessageKey` 的收窄 **cast 收在 core 内部**：
+ * 字符串拼接的结果是 `string`，让三个适配层各自 `as MessageKey` 等于把不安全的一面
+ * 复制三遍。这里集中一次，且入参类型是 `RegexFlag`，取值必然落在八个 `flag.*` 之内。
+ */
+export function flagMessage(locale: Locale, flag: RegexFlag): string {
+  return translate(locale, ('flag.' + flag) as MessageKey);
 }

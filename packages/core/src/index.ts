@@ -72,7 +72,7 @@ export type { AstNode, AstNodeKind, GroupKind, ParseResult, Quantifier } from '.
 
 export { DEFAULT_METRICS, layoutRailroad } from './layout';
 
-export type { BoxTone, Diagram, DiagramBox, DiagramEdge, DiagramMetrics } from './layout';
+export type { BoxTone, Diagram, DiagramBox, DiagramEdge, DiagramMetrics, LayoutOptions } from './layout';
 
 export { applyCanvasOps, escapeXml, renderCanvasOps, renderSvg } from './painter';
 
@@ -94,7 +94,9 @@ export {
   createTranslator,
   flagMessage,
   normalizeLocaleTag,
+  quantifierLabel,
   resolveLocale,
+  tokenLabel,
   translate
 } from './i18n';
 

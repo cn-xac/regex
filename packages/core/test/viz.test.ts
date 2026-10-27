@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { parsePattern, stringifyAst } from '../src/parser';
 import type { AstNode } from '../src/parser';
 import { DEFAULT_METRICS, layoutRailroad } from '../src/layout';
-import type { BoxTone, Diagram } from '../src/layout';
+import type { BoxTone, Diagram, DiagramBox } from '../src/layout';
+import type { Locale } from '../src/i18n';
 import { applyCanvasOps, escapeXml, renderCanvasOps, renderSvg } from '../src/painter';
 import type { CanvasOp, PaintContext } from '../src/painter';
 
@@ -25,7 +26,7 @@ const PATTERNS: readonly string[] = [
 ];
 
 const TONES: readonly string[] = [
-  'literal',
+  'text',
   'characterClass',
   'escape',
   'anchor',
@@ -48,6 +49,10 @@ function astFor(pattern: string): AstNode {
   const r = parsePattern(pattern);
   if (!r.ok) throw new Error(`测试前提不成立：${pattern}`);
   return r.ast;
+}
+
+function boxesOf(pattern: string, locale: Locale = 'zh-CN'): readonly DiagramBox[] {
+  return layoutRailroad(astFor(pattern), { locale }).boxes;
 }
 
 describe('layout 不变量', () => {
@@ -123,11 +128,11 @@ describe('layout 不变量', () => {
 
   it('交替分支垂直堆叠、序列水平推进（几何与 AST 形态一致）', () => {
     const choice = diagramFor('aaaa|bbbbbb|cc');
-    const ys = choice.boxes.filter((b) => b.tone === 'literal').map((b) => b.y);
+    const ys = choice.boxes.filter((b) => b.tone === 'text').map((b) => b.y);
     expect(new Set(ys).size).toBeGreaterThan(1);
 
     const seq = diagramFor('abcdef');
-    const xs = seq.boxes.filter((b) => b.tone === 'literal').map((b) => b.x);
+    const xs = seq.boxes.filter((b) => b.tone === 'text').map((b) => b.x);
     const sorted = [...xs].sort((a, b) => a - b);
     expect(xs).toEqual(sorted);
   });
@@ -137,8 +142,74 @@ describe('layout 不变量', () => {
    * 这条断言就是预览图「上下错位」的捕获者 —— 无论错因是逐步抬高 height，
    * 还是标签占了垂直分配空间，它都会红。
    */
+  /** 使用者反馈 1：`a|bb|ccc` 不该把 bb / ccc 逐字符拆盒。 */
+  it('连续字面量折成一个盒子', () => {
+    const texts = boxesOf('a|bb|ccc').filter((b) => b.tone === 'text');
+    expect(texts.map((b) => b.label).sort()).toEqual(['a', 'bb', 'ccc']);
+    expect(texts.map((b) => b.source?.start)).toEqual([0, 2, 5]);
+    // `ab+c`：a 与 c 被量化的 b 隔开，不得并成一个「ac」；
+    // b 自己在 quantified 内部仍出一个 text 盒，所以顺序是 a、b、c。
+    expect(boxesOf('ab+c').filter((b) => b.tone === 'text').map((b) => b.label)).toEqual(['a', 'b', 'c']);
+  });
+
+  /** 使用者反馈 2：`\d` `\w` `.` 在中文界面下要读出语义，原始写法另存字段。 */
+  it('转义与点号按语言出语义标签，且保留原始写法', () => {
+    const zh = boxesOf('\\d\\w.', 'zh-CN').filter((b) => b.tone === 'escape' || b.tone === 'dot');
+    expect(zh.map((b) => b.label)).toEqual(['数字', '字母', '任意字符']);
+    expect(zh.map((b) => b.escaped)).toEqual(['\\d', '\\w', '.']);
+    const en = boxesOf('\\d\\w.', 'en').filter((b) => b.tone === 'escape' || b.tone === 'dot');
+    expect(en.map((b) => b.label)).toEqual(['digit', 'letter', 'any char']);
+    // 没有专门词条的转义必须退回原写法，不能被瞎猜翻译
+    expect(boxesOf('\\s\\+', 'zh-CN').map((b) => b.label)).toEqual(['空白', '\\+']);
+  });
+
+  /** 使用者反馈 3：组框上方标 #N；非捕获与断言不标编号。 */
+  it('捕获组标 #N、命名组带名字，非捕获与断言不标编号', () => {
+    const tags = (p: string) =>
+      boxesOf(p).filter((b) => b.tone === 'tagGroupPrefix').map((b) => b.label);
+    expect(tags('(?<year>a)')).toEqual(['#1 year']);
+    expect(tags('(a)(b)')).toEqual(['#1', '#2']);
+    expect(tags('(?<x>a)(b)(c)')).toEqual(['#1 x', '#2', '#3']);
+    expect(tags('(?:a)(?=b)(?<=c)(?!d)')).toEqual(['(?:', '(?=', '(?<=', '(?!']);
+  });
+
+  /** 使用者反馈 3 的另一半：次数说人话，且放在内容后面而不是浮在上方。 */
+  it('次数标识跟在内容右侧，用「一次以上 / 0次以上」的说法', () => {
+    const plus = boxesOf('a+');
+    const body = plus.find((b) => b.label === 'a');
+    const tag = plus.find((b) => b.tone === 'tagQuantifier');
+    expect(tag?.label).toBe('一次以上');
+    expect(body !== undefined && tag !== undefined && tag.x >= body.x + body.w - 1).toBe(true);
+    // 与主体同一水平带（不再抬高基线）
+    expect(body !== undefined && tag !== undefined && Math.abs((tag.y + tag.h / 2) - (body.y + body.h / 2)) < 1).toBe(true);
+    expect(boxesOf('a*').find((b) => b.tone === 'tagQuantifier')?.label).toBe('0次以上');
+    expect(boxesOf('a?').find((b) => b.tone === 'tagQuantifier')?.label).toBe('0或1次');
+    expect(boxesOf('a{3}').find((b) => b.tone === 'tagQuantifier')?.label).toBe('恰好3次');
+    expect(boxesOf('a{2,}').find((b) => b.tone === 'tagQuantifier')?.label).toBe('2次以上');
+    expect(boxesOf('a{2,4}').find((b) => b.tone === 'tagQuantifier')?.label).toBe('2到4次');
+    expect(boxesOf('a+?').find((b) => b.tone === 'tagQuantifier')?.label).toBe('一次以上·非贪婪');
+  });
+
+  /** 使用者反馈 4：内容与分组框之间留白，且内容在内容区垂直居中。 */
+  it('组内容四周留白、左右对称，且不与标签重叠', () => {
+    const boxes = boxesOf('(?<x>ab)');
+    const container = boxes.find((b) => b.tone === 'group');
+    const inner = boxes.find((b) => b.tone === 'text');
+    const tag = boxes.find((b) => b.tone === 'tagGroupPrefix');
+    expect(container !== undefined && inner !== undefined && tag !== undefined).toBe(true);
+    if (container === undefined || inner === undefined || tag === undefined) return;
+    const leftGap = inner.x - container.x;
+    const rightGap = container.x + container.w - (inner.x + inner.w);
+    const bottomGap = container.y + container.h - (inner.y + inner.h);
+    expect(leftGap).toBe(rightGap);
+    expect(leftGap).toBeGreaterThan(0);
+    expect(bottomGap).toBeGreaterThan(0);
+    // 内容与组标签之间也要有间隙，不能压在标签上
+    expect(inner.y).toBeGreaterThan(tag.y + tag.h);
+  });
+
   it('同一序列内的主体盒子垂直中心一致（基线对齐）', () => {
-    const LEAF: readonly string[] = ['literal', 'escape', 'dot', 'characterClass', 'backreference', 'anchor'];
+    const LEAF: readonly string[] = ['text', 'escape', 'dot', 'characterClass', 'backreference', 'anchor'];
     for (const pattern of ['abcdef', '\\d+abc', 'a(b)c', '(?<x>a)b', '[a-z]+\\d', '(a)(b)(c)']) {
       const centers = new Set(
         diagramFor(pattern)
@@ -167,26 +238,26 @@ describe('layout 不变量', () => {
       const box = d.boxes.find((b) => b.label === label);
       return box === undefined ? Number.NaN : Math.round((box.y + box.h / 2) * 100) / 100;
     };
-    expect(center(quantified, 'b')).toBe(center(quantified, 'a'));
-    // 跨图比绝对中心无意义（末尾按 bbox 统一平移，有标签的图整体更高）；
-    // 有意义的断言是：标签确实要画布空间，但不改变图内的基线对齐（上一条）。
-    expect(quantified.height).toBeGreaterThan(bare.height);
+    // 量词改为跟在右侧：占宽度、**不占高度**（这正是「不压低基线」的表达）
+    expect(quantified.width).toBeGreaterThan(bare.width);
+    expect(quantified.height).toBe(bare.height);
+    expect(center(quantified, 'a')).toBe(center(quantified, 'b'));
     expect(center(bare, 'a')).toBe(center(bare, 'b'));
     const tag = quantified.boxes.find((b) => b.tone === 'tagQuantifier');
     const body = quantified.boxes.find((b) => b.label === 'a');
-    expect(tag !== undefined && body !== undefined && tag.y < body.y).toBe(true);
+    expect(tag !== undefined && body !== undefined && tag.x >= body.x + body.w - 1).toBe(true);
   });
 
   it('量词与组前缀各自产出标签盒', () => {
     const d = diagramFor('\\d{2,}');
-    expect(d.boxes.some((b) => b.tone === 'tagQuantifier' && b.label === '{2,}')).toBe(true);
+    expect(d.boxes.some((b) => b.tone === 'tagQuantifier' && b.label === '2次以上')).toBe(true);
     const g = diagramFor('(?<year>\\d{4})');
-    expect(g.boxes.some((b) => b.tone === 'tagGroupPrefix' && b.label === '(?<year>')).toBe(true);
+    expect(g.boxes.some((b) => b.tone === 'tagGroupPrefix' && b.label === '#1 year')).toBe(true);
   });
 
   it('metrics 可调且默认值冻结', () => {
     expect(Object.isFrozen(DEFAULT_METRICS)).toBe(true);
-    const wide = layoutRailroad(astFor('abc'), { charWidth: 20 });
+    const wide = layoutRailroad(astFor('abc'), { metrics: { charWidth: 20 } });
     const narrow = layoutRailroad(astFor('abc'));
     expect(wide.width).toBeGreaterThan(narrow.width);
   });
@@ -205,10 +276,10 @@ describe('SVG painter', () => {
     }
   });
 
-  it('label 里的尖括号与 & 必须转义（正则分组符号必然出现）', () => {
-    const svg = renderSvg(diagramFor('(?<year>a)'));
-    expect(svg).toContain('(?&lt;year&gt;');
-    expect(svg).not.toContain('(?<year>)');
+  it('label 里的尖括号必须转义（反向引用写法必然带 <>）', () => {
+    const svg = renderSvg(diagramFor('(?<x>a)\\k<x>'));
+    expect(svg).toContain('\\k&lt;x&gt;');
+    expect(svg).not.toContain('\\k<x>');
     expect(escapeXml('<&">')).toBe('&lt;&amp;&quot;&gt;');
   });
 
@@ -293,7 +364,7 @@ describe('Canvas painter', () => {
     const expected = d.boxes.filter((b) => b.label !== '').map((b) => b.label);
     expect(labels.sort()).toEqual([...expected].sort());
     // 分组前缀与字符类内容必须真的被画出来
-    expect(labels.some((l) => l.includes('(?<x>'))).toBe(true);
+    expect(labels.some((l) => l.includes('#1 x'))).toBe(true);
     expect(labels.some((l) => l.includes('[b-z]'))).toBe(true);
   });
 

@@ -92,8 +92,8 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
   const diagram = useMemo<string>(() => {
     const result = parsePattern(parsed.pattern, parsed.flags);
     if (!result.ok) return '';
-    return renderSvg(layoutRailroad(result.ast), { theme: svgTheme });
-  }, [parsed, svgTheme]);
+    return renderSvg(layoutRailroad(result.ast, { locale }), { theme: svgTheme });
+  }, [parsed, svgTheme, locale]);
 
   const onSourceInput = useCallback(
     (event: ChangeEvent<HTMLInputElement>): void => {

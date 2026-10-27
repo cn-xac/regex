@@ -27,7 +27,7 @@ interface Paint {
 }
 
 const LIGHT: Readonly<Record<BoxTone, Paint>> = Object.freeze({
-  literal: Object.freeze({ stroke: '#475569', fill: '#ffffff', text: '#0f172a' }),
+  text: Object.freeze({ stroke: '#475569', fill: '#ffffff', text: '#0f172a' }),
   dot: Object.freeze({ stroke: '#475569', fill: '#e2e8f0', text: '#0f172a' }),
   escape: Object.freeze({ stroke: '#1c63b5', fill: '#e7f0fa', text: '#123a63' }),
   characterClass: Object.freeze({ stroke: '#6741d9', fill: '#f1e9fd', text: '#3d2580' }),
@@ -41,7 +41,7 @@ const LIGHT: Readonly<Record<BoxTone, Paint>> = Object.freeze({
 });
 
 const DARK: Readonly<Record<BoxTone, Paint>> = Object.freeze({
-  literal: Object.freeze({ stroke: '#94a3b8', fill: '#1b2028', text: '#e6eaf0' }),
+  text: Object.freeze({ stroke: '#94a3b8', fill: '#1b2028', text: '#e6eaf0' }),
   dot: Object.freeze({ stroke: '#94a3b8', fill: '#252c37', text: '#e6eaf0' }),
   escape: Object.freeze({ stroke: '#74c0fc', fill: '#16283c', text: '#bfe0ff' }),
   characterClass: Object.freeze({ stroke: '#b197fc', fill: '#251a3d', text: '#ddcdff' }),
@@ -116,7 +116,10 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
   for (const box of diagram.boxes) {
     const paint = colors[box.tone];
     const tag = isTagTone(box.tone);
-    const attrs = box.source === undefined ? '' : ` data-start="${box.source.start}" data-end="${box.source.end}"`;
+    const attrs =
+      (box.source === undefined ? '' : ` data-start="${box.source.start}" data-end="${box.source.end}"`) +
+      // 图上显示的是本地化语义（如「数字」），原始写法用 data-escaped 保留可逆信息
+      (box.escaped === undefined ? '' : ` data-escaped="${escapeXml(box.escaped)}"`);
     parts.push(
       `<g class="x-ac-regex-node x-ac-regex-node--${box.tone}" data-id="${escapeXml(box.id)}"` +
         ` data-tone="${box.tone}" data-depth="${box.depth}"${attrs}>`

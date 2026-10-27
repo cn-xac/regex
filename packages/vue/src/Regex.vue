@@ -81,7 +81,7 @@ const issues = computed(() => [...parsed.value.issues, ...parseFlags(parsed.valu
 const diagram = computed<string>(() => {
   const result = parsePattern(parsed.value.pattern, parsed.value.flags);
   if (!result.ok) return '';
-  return renderSvg(layoutRailroad(result.ast), { theme: props.svgTheme });
+  return renderSvg(layoutRailroad(result.ast, { locale: locale.value }), { theme: props.svgTheme });
 });
 
 function onSourceInput(event: Event): void {

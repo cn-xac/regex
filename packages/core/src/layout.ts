@@ -1,22 +1,26 @@
 /**
  * layout —— AST → DOM-free 几何（铁路图）。
  *
- * 为什么单独一层：SVG 后端要产出标记字符串、Canvas 后端要产出绘制指令序列，如果各自
- * 去算坐标，两栈必然漂移。所以这里一次性把 AST 摊平成「盒子 + 连线」的纯数据，
- * painter 只负责照着描，不做任何布局判断。
+ * 为什么单独一层：SVG 后端要产出标记字符串、Canvas 后端要产出指令序列，如果各自算坐标
+ * 必然漂移。这里一次性把 AST 摊平成「盒子 + 连线」的纯数据，painter 只照着描。
  *
- * 三条约束：
- * - **确定性**：同输入必得同输出，id 走路径编码（`'0.2.1'`）而不是自增计数器，
- *   否则两次布局的 id 不同会让测试与前端缓存都失稳；
- * - **不重叠**：sequence 内 x 严格递增、choice 内 y 严格递增，由测试钉住；
- * - **等宽假设**：pattern 用等宽字体排版（core 的 style.css 已把 `.x-ac-regex-mono`
- *   设为等宽），所以宽度按字符数估算即可，不需要测量文本。
+ * 五条排版规则（来自使用者对预览图的反馈，每条都有对应不变量测试）：
+ * 1. **连续字面量合并成一个盒子** —— 逐字符拆盒会让 `a|bb|ccc` 的三个分支看起来是
+ *    1/2/3 个独立元素，读不出"这是一段文本"。
+ * 2. **字符类别走本地化语义** —— 中文下 `\d` 显示「数字」、`.` 显示「任意字符」。
+ * 3. **次数标识跟在内容后面**（不再悬浮在上方），并用「一次以上 / 0次以上」这类说法。
+ * 4. **分组框上方标 `#1` `#2`**；非捕获组与零宽断言**不标编号**（它们不产生捕获序号，
+ *    标了会误导用户去数 group）。
+ * 5. **内容与框之间留白，且主体在内容区垂直居中**；标签与量化后缀都不参与垂直分配，
+ *    否则同一条序列里的元素会互相错位。
  */
+import { quantifierLabel, tokenLabel } from './i18n';
+import type { Locale } from './i18n';
 import type { AstNode } from './parser';
 import type { SourceRange } from './types';
 
 export type BoxTone =
-  | 'literal'
+  | 'text'
   | 'characterClass'
   | 'escape'
   | 'anchor'
@@ -36,9 +40,9 @@ export interface DiagramBox {
   readonly h: number;
   readonly label: string;
   readonly tone: BoxTone;
-  /** 容器盒没有对应片段；叶子盒带上它，供视图反查。 */
   readonly source?: SourceRange;
-  /** 嵌套深度，视图用它决定层级配色（不只靠颜色区分）。 */
+  /** 原始转义写法（如 `\d`）：图上显示本地化语义，可逆信息由视图挂到 data-* 上。 */
+  readonly escaped?: string;
   readonly depth: number;
 }
 
@@ -59,6 +63,12 @@ export interface DiagramMetrics {
   readonly minWidth: number;
 }
 
+export interface LayoutOptions {
+  readonly metrics?: Partial<DiagramMetrics>;
+  /** 图上文字的语言（默认与界面一致由调用方决定，这里不读 navigator）。 */
+  readonly locale?: Locale;
+}
+
 export interface Diagram {
   readonly width: number;
   readonly height: number;
@@ -68,16 +78,20 @@ export interface Diagram {
 
 export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
   charWidth: 9,
-  lineHeight: 18,
+  lineHeight: 17,
   leafHeight: 28,
-  padX: 8,
-  padY: 10,
+  padX: 9,
+  padY: 9,
   gapX: 10,
-  gapY: 12,
+  gapY: 14,
   minWidth: 26
 });
 
-/** 内部可写结构，输出前统一冻结。 */
+interface Ctx {
+  readonly m: DiagramMetrics;
+  readonly locale: Locale;
+}
+
 interface Placed {
   boxes: DiagramBox[];
   edges: DiagramEdge[];
@@ -89,44 +103,16 @@ function leafWidth(label: string, m: DiagramMetrics): number {
   return Math.max(m.minWidth, label.length * m.charWidth + m.padX * 2);
 }
 
-function leafLabel(node: AstNode): { label: string; tone: BoxTone } {
-  switch (node.kind) {
-    case 'literal':
-      return { label: node.text ?? '', tone: 'literal' };
-    case 'dot':
-      return { label: '.', tone: 'dot' };
-    case 'characterClass':
-      return { label: `[${node.negated === true ? '^' : ''}${node.classBody ?? ''}]`, tone: 'characterClass' };
-    case 'escape':
-      return { label: `\\${node.text ?? ''}`, tone: 'escape' };
-    case 'backreference':
-      return {
-        label: node.name !== undefined ? `\\k<${node.name}>` : `\\${node.text ?? ''}`,
-        tone: 'backreference'
-      };
-    case 'assertion':
-      return {
-        label: node.text === '^' || node.text === '$' ? node.text : `\\${node.text ?? ''}`,
-        tone: 'anchor'
-      };
-    case 'group': {
-      const kind = node.group ?? 'capturing';
-      if (kind.startsWith('look')) {
-        return { label: groupTag(kind), tone: 'assertion' };
-      }
-      return { label: groupTag(kind), tone: 'group' };
-    }
-    default:
-      return { label: '', tone: 'literal' };
-  }
-}
-
-function groupTag(kind: string): string {
+/** 分组的框上标签：捕获组带 `#N`，非捕获与断言明确不带编号。 */
+function groupTag(node: AstNode): string {
+  const kind = node.group ?? 'capturing';
   switch (kind) {
+    case 'capturing':
+      return `#${node.ordinal ?? 0}`;
+    case 'named':
+      return `#${node.ordinal ?? 0} ${node.name ?? ''}`;
     case 'nonCapturing':
       return '(?:';
-    case 'named':
-      return '(?<';
     case 'lookahead':
       return '(?=';
     case 'negativeLookahead':
@@ -140,110 +126,200 @@ function groupTag(kind: string): string {
   }
 }
 
-function place(node: AstNode, idPath: string, depth: number, m: DiagramMetrics): Placed {
+function leafLabel(node: AstNode, ctx: Ctx): { label: string; tone: BoxTone; escaped?: string } {
+  switch (node.kind) {
+    case 'dot':
+      return { label: tokenLabel(ctx.locale, '.') ?? '.', tone: 'dot', escaped: '.' };
+    case 'characterClass':
+      return {
+        label: `[${node.negated === true ? '^' : ''}${node.classBody ?? ''}]`,
+        tone: 'characterClass',
+        escaped: `[${node.negated === true ? '^' : ''}${node.classBody ?? ''}]`
+      };
+    case 'escape': {
+      const raw = node.text ?? '';
+      const localized = tokenLabel(ctx.locale, raw);
+      if (localized !== null) {
+        return { label: localized, tone: 'escape', escaped: BS + raw };
+      }
+      return { label: BS + raw, tone: 'escape', escaped: BS + raw };
+    }
+    case 'backreference':
+      return {
+        label: node.name !== undefined ? `\\k<${node.name}>` : `\\${node.text ?? ''}`,
+        tone: 'backreference'
+      };
+    case 'assertion': {
+      const text = node.text ?? '';
+      return { label: text === '^' || text === '$' ? text : BS + text, tone: 'anchor' };
+    }
+    default:
+      return { label: node.text ?? '', tone: 'text' };
+  }
+}
+
+const BS = String.fromCharCode(92);
+
+function box(
+  id: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  label: string,
+  tone: BoxTone,
+  depth: number,
+  source?: SourceRange,
+  escaped?: string
+): DiagramBox {
+  return Object.freeze({
+    id,
+    x,
+    y,
+    w,
+    h,
+    label,
+    tone,
+    depth,
+    ...(source === undefined ? {} : { source }),
+    ...(escaped === undefined ? {} : { escaped })
+  });
+}
+
+function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
   switch (node.kind) {
     case 'alternative':
-      return placeSequence(node, idPath, depth, m);
+      return placeSequence(node, idPath, depth, ctx);
     case 'disjunction':
-      return placeChoice(node, idPath, depth, m);
+      return placeChoice(node, idPath, depth, ctx);
     case 'quantified': {
-      const inner = place(node.children[0] as AstNode, `${idPath}.0`, depth, m);
-      const tag = node.quantifier?.source ?? '';
-      const tagW = leafWidth(tag, m);
-      const tagH = m.leafHeight * 0.7;
-      const tagY = -tagH - m.padY / 2;
-      const boxes: DiagramBox[] = [
-        ...inner.boxes,
-        {
-          id: `${idPath}.q`,
-          x: inner.width - tagW,
-          y: tagY,
-          w: tagW,
-          h: tagH,
-          label: tag,
-          tone: 'tagQuantifier',
-          source: { start: node.start, end: node.end },
-          depth
-        }
-      ];
-      // 主体高度即返回高度：标签**悬浮**在上方（负 y，由 layoutRailroad 末尾统一平移），
-      // 不占垂直分配。否则量词会把主体推离基线，与相邻无量化元素混排时必然错位。
-      return { boxes, edges: inner.edges, width: Math.max(inner.width, tagW), height: inner.height };
+      const inner = place(node.children[0] as AstNode, `${idPath}.0`, depth, ctx);
+      const q = node.quantifier;
+      const label = q === undefined ? '' : quantifierLabel(ctx.locale, q);
+      const tagW = leafWidth(label, ctx.m);
+      const tagH = ctx.m.lineHeight;
+      const gap = 4;
+      const boxes: DiagramBox[] = [...inner.boxes];
+      if (label !== '') {
+        // 次数标识跟在内容后面，并与主体垂直对齐 —— 不占垂直分配，避免抬高基线。
+        boxes.push(
+          box(
+            `${idPath}.q`,
+            inner.width + gap,
+            (inner.height - tagH) / 2,
+            tagW,
+            tagH,
+            label,
+            'tagQuantifier',
+            depth,
+            { start: node.start, end: node.end },
+            q?.source
+          )
+        );
+      }
+      return {
+        boxes,
+        edges: inner.edges,
+        width: inner.width + (label === '' ? 0 : gap + tagW),
+        height: inner.height
+      };
     }
     case 'group': {
-      const inner = place(node.children[0] as AstNode, `${idPath}.0`, depth + 1, m);
-      const kind = node.group ?? 'capturing';
-      const isAssertion = kind.startsWith('look');
-      const pad = m.padX + 6;
-      const label =
-        kind === 'named' ? `(?<${node.name ?? ''}>` : kind === 'capturing' ? `(${node.ordinal ?? ''})` : groupTag(kind);
-      const tagH = m.lineHeight;
-      const tagY = -tagH - m.padY / 2;
-      const boxes: DiagramBox[] = [
-        {
-          id: idPath,
-          x: 0,
-          // 容器向上扩出前缀标签的空间，主体仍落在 0..inner.height
-          y: tagY - m.padY / 2,
-          w: inner.width + pad * 2,
-          h: -tagY + m.padY / 2 + inner.height + m.padY / 2,
-          label: '',
-          tone: isAssertion ? 'assertion' : 'group',
-          source: { start: node.start, end: node.end },
-          depth
-        },
-        {
-          id: `${idPath}.p`,
-          x: pad,
-          y: tagY,
-          w: leafWidth(label, m),
-          h: tagH,
-          label,
-          tone: 'tagGroupPrefix',
-          source: { start: node.start, end: node.end },
-          depth
-        },
-        ...shift(inner.boxes, pad, 0)
-      ];
-      // group 的进出连线由外层 sequence 统一处理，这里只搬运内层边 ——
-      // 不要在这里补占位边（曾有一条 from===to 的零长度线，纯噪音）。
-      const edges: DiagramEdge[] = [...shiftEdges(inner.edges, pad, 0)];
-      return { boxes, edges, width: inner.width + pad * 2, height: inner.height };
-    }
-    default: {
-      const { label, tone } = leafLabel(node);
-      const w = leafWidth(label, m);
+      const inner = place(node.children[0] as AstNode, `${idPath}.0`, depth + 1, ctx);
+      const isAssertion = (node.group ?? 'capturing').startsWith('look');
+      const padX = ctx.m.padX + 6;
+      const padY = ctx.m.padY;
+      const tagH = ctx.m.lineHeight;
+      const tag = groupTag(node);
+      const tagW = leafWidth(tag, ctx.m);
+      // 容器向上扩出「标签行 + 上留白」，主体仍留在 0..inner.height，
+      // 于是它在去掉标签行后的内容区里天然垂直居中，且基线不受标签影响。
+      const containerY = -(tagH + padY);
+      const containerH = tagH + padY + inner.height + padY;
       return {
         boxes: [
-          {
-            id: idPath,
-            x: 0,
-            y: 0,
-            w,
-            h: m.leafHeight,
-            label,
-            tone,
-            source: { start: node.start, end: node.end },
-            depth
-          }
+          box(
+            idPath,
+            0,
+            containerY,
+            inner.width + padX * 2,
+            containerH,
+            '',
+            isAssertion ? 'assertion' : 'group',
+            depth,
+            { start: node.start, end: node.end }
+          ),
+          box(
+            `${idPath}.p`,
+            padX,
+            containerY + padY / 2,
+            tagW,
+            tagH,
+            tag,
+            'tagGroupPrefix',
+            depth,
+            { start: node.start, end: node.end }
+          ),
+          ...shift(inner.boxes, padX, 0)
+        ],
+        edges: [...shiftEdges(inner.edges, padX, 0)],
+        width: inner.width + padX * 2,
+        height: inner.height
+      };
+    }
+    default: {
+      const { label, tone, escaped } = leafLabel(node, ctx);
+      const w = leafWidth(label, ctx.m);
+      return {
+        boxes: [
+          box(idPath, 0, 0, w, ctx.m.leafHeight, label, tone, depth, {
+            start: node.start,
+            end: node.end
+          }, escaped)
         ],
         edges: [],
         width: w,
-        height: m.leafHeight
+        height: ctx.m.leafHeight
       };
     }
   }
 }
 
-function placeSequence(node: AstNode, idPath: string, depth: number, m: DiagramMetrics): Placed {
+type Item = { readonly kind: 'node'; readonly node: AstNode } | { readonly kind: 'run'; readonly text: string; readonly start: number; readonly end: number };
+
+/**
+ * 把同一 sequence 里**相邻且未被量化**的字面量折成一个 run。
+ * 只折 literal：`\d\d` 折成「数字数字」并不可读，锚点/类/组也必须各自成框。
+ */
+function foldLiterals(children: readonly AstNode[]): Item[] {
+  const items: Item[] = [];
+  for (const child of children) {
+    if (child.kind === 'literal') {
+      const last = items[items.length - 1];
+      if (last !== undefined && last.kind === 'run') {
+        items[items.length - 1] = { kind: 'run', text: last.text + (child.text ?? ''), start: last.start, end: child.end };
+        continue;
+      }
+      items.push({ kind: 'run', text: child.text ?? '', start: child.start, end: child.end });
+      continue;
+    }
+    items.push({ kind: 'node', node: child });
+  }
+  return items;
+}
+
+function placeSequence(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
+  const items = foldLiterals(node.children);
+  const placed = items.map((item, i) =>
+    item.kind === 'node'
+      ? place(item.node, `${idPath}.${i}`, depth, ctx)
+      : placeRun(item.text, item.start, item.end, `${idPath}.${i}`, depth, ctx)
+  );
+
   const boxes: DiagramBox[] = [];
   const edges: DiagramEdge[] = [];
-  const placed = node.children.map((child, i) => place(child, `${idPath}.${i}`, depth, m));
-
-  // 必须先量完所有子项再居中：早先版本在循环里边推进边抬高 height，
-  // 导致序列越往右的盒子基准越高 —— 表现为整条链「上下错位」。
-  const height = placed.reduce((max, p) => Math.max(max, p.height), m.leafHeight);
-
+  // 必须先量完所有子项再居中：边推进边抬高 height 会让越靠右的盒子基准越高。
+  const height = placed.reduce((max, p) => Math.max(max, p.height), ctx.m.leafHeight);
   let x = 0;
   placed.forEach((p, i) => {
     const offsetY = Math.round((height - p.height) / 2);
@@ -252,24 +328,33 @@ function placeSequence(node: AstNode, idPath: string, depth: number, m: DiagramM
     if (i > 0) {
       edges.push({
         id: `${idPath}.c${i}`,
-        from: { x: x - m.gapX, y: height / 2 },
+        from: { x: x - ctx.m.gapX, y: height / 2 },
         to: { x, y: offsetY + p.height / 2 }
       });
     }
-    x += p.width + m.gapX;
+    x += p.width + ctx.m.gapX;
   });
-
-  return { boxes, edges, width: Math.max(0, x - m.gapX), height };
+  return { boxes, edges, width: Math.max(0, x - ctx.m.gapX), height };
 }
 
-function placeChoice(node: AstNode, idPath: string, depth: number, m: DiagramMetrics): Placed {
+function placeRun(text: string, start: number, end: number, id: string, depth: number, ctx: Ctx): Placed {
+  const w = leafWidth(text, ctx.m);
+  return {
+    boxes: [box(id, 0, 0, w, ctx.m.leafHeight, text, 'text', depth, { start, end }, text)],
+    edges: [],
+    width: w,
+    height: ctx.m.leafHeight
+  };
+}
+
+function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
+  const m = ctx.m;
   const boxes: DiagramBox[] = [];
   const edges: DiagramEdge[] = [];
-  const branches = node.children.map((child, i) => place(child, `${idPath}.${i}`, depth, m));
+  const branches = node.children.map((child, i) => place(child, `${idPath}.${i}`, depth, ctx));
   const width = branches.reduce((max, b) => Math.max(max, b.width), 0);
-  const totalHeight =
-    branches.reduce((sum, b) => sum + b.height, 0) + m.gapY * Math.max(0, branches.length - 1);
-  const spineY = totalHeight / 2; // 汇聚中线：分支可能比 leafHeight 高，不能用它当中线
+  const totalHeight = branches.reduce((sum, b) => sum + b.height, 0) + m.gapY * Math.max(0, branches.length - 1);
+  const spineY = totalHeight / 2;
 
   let y = 0;
   branches.forEach((branch, i) => {
@@ -285,12 +370,7 @@ function placeChoice(node: AstNode, idPath: string, depth: number, m: DiagramMet
     y += branch.height + m.gapY;
   });
 
-  return {
-    boxes,
-    edges,
-    width: width + m.gapX * 2,
-    height: Math.max(m.leafHeight, totalHeight)
-  };
+  return { boxes, edges, width: width + m.gapX * 2, height: Math.max(m.leafHeight, totalHeight) };
 }
 
 function shift(boxes: readonly DiagramBox[], dx: number, dy: number): DiagramBox[] {
@@ -309,13 +389,15 @@ function shiftEdges(edges: readonly DiagramEdge[], dx: number, dy: number): Diag
 
 /**
  * 把 AST 布局成铁路图几何。纯函数、无 DOM、结果全冻结。
- *
- * 返回值里的 `boxes` 与 `edges` 是**已解算绝对坐标**的扁平数组，
- * 视图侧一次遍历即可画完，不需要再理解 AST 结构。
+ * 输出的 boxes/edges 已是绝对坐标的扁平数组，视图一次遍历即可画完。
  */
-export function layoutRailroad(ast: AstNode, metrics?: Partial<DiagramMetrics>): Diagram {
-  const m: DiagramMetrics = { ...DEFAULT_METRICS, ...metrics };
-  const placed = place(ast, 'r', 0, m);
+export function layoutRailroad(ast: AstNode, options: LayoutOptions = {}): Diagram {
+  const ctx: Ctx = {
+    m: { ...DEFAULT_METRICS, ...options.metrics },
+    locale: options.locale ?? 'zh-CN'
+  };
+  const m = ctx.m;
+  const placed = place(ast, 'r', 0, ctx);
 
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
@@ -339,16 +421,13 @@ export function layoutRailroad(ast: AstNode, metrics?: Partial<DiagramMetrics>):
     maxX = m.minWidth;
     maxY = m.leafHeight;
   }
-  const ox = m.padX - minX;
-  const oy = m.padY - minY;
   const pad = m.padX + m.padY;
 
   return Object.freeze({
     width: Math.max(m.minWidth, maxX - minX + pad),
     height: Math.max(m.leafHeight, maxY - minY + pad),
-    // shift/shiftEdges 内部已逐元素冻结，这里只冻结数组本身
-    // （再套一层 map(Object.freeze) 会把元素类型压成 Readonly<unknown>，丢类型）。
-    boxes: Object.freeze(shift(placed.boxes, ox, oy)),
-    edges: Object.freeze(shiftEdges(placed.edges, ox, oy))
+    // shift/shiftEdges 内已逐元素冻结，这里只冻结数组本身
+    boxes: Object.freeze(shift(placed.boxes, m.padX - minX, m.padY - minY)),
+    edges: Object.freeze(shiftEdges(placed.edges, m.padX - minX, m.padY - minY))
   });
 }

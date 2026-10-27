@@ -78,8 +78,8 @@ function VanillaPanel({ candidates }: { candidates: readonly string[] }): JSX.El
     const host = svgRef.current;
     if (host === null) return;
     const result = parsePattern(pattern, normalizeFlags(flags));
-    host.innerHTML = result.ok ? renderSvg(layoutRailroad(result.ast)) : '';
-  }, [pattern, flags]);
+    host.innerHTML = result.ok ? renderSvg(layoutRailroad(result.ast, { locale: resolveLocale(candidates) })) : '';
+  }, [pattern, flags, candidates]);
 
   return (
     <section className="pg-panel">

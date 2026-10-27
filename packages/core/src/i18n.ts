@@ -87,7 +87,22 @@ export type MessageKey =
   | 'issue.unknownGroupRef'
   | 'issue.partialSession'
   | 'issue.malformedState'
-  | 'issue.unsupportedStateVersion';
+  | 'issue.unsupportedStateVersion'
+  // 图上用的字符类别与次数语义
+  | 'token.anyChar'
+  | 'token.digit'
+  | 'token.nonDigit'
+  | 'token.wordChar'
+  | 'token.nonWordChar'
+  | 'token.whitespace'
+  | 'token.nonWhitespace'
+  | 'token.quantZeroOrMore'
+  | 'token.quantOneOrMore'
+  | 'token.quantZeroOrOne'
+  | 'token.quantExactly'
+  | 'token.quantAtLeast'
+  | 'token.quantRange'
+  | 'token.nonGreedy';
 
 const ZH: Record<MessageKey, string> = {
   'app.title': '正则测试器',
@@ -144,7 +159,21 @@ const ZH: Record<MessageKey, string> = {
   'issue.unknownGroupRef': '替换串引用了不存在的捕获组',
   'issue.partialSession': '匹配结果不完整，已拒绝在此基础上替换',
   'issue.malformedState': '分享链接已损坏，无法解析',
-  'issue.unsupportedStateVersion': '分享链接的版本不受支持'
+  'issue.unsupportedStateVersion': '分享链接的版本不受支持',
+  'token.anyChar': '任意字符',
+  'token.digit': '数字',
+  'token.nonDigit': '非数字',
+  'token.wordChar': '字母',
+  'token.nonWordChar': '非字母',
+  'token.whitespace': '空白',
+  'token.nonWhitespace': '非空白',
+  'token.quantZeroOrMore': '0次以上',
+  'token.quantOneOrMore': '一次以上',
+  'token.quantZeroOrOne': '0或1次',
+  'token.quantExactly': '恰好{count}次',
+  'token.quantAtLeast': '{min}次以上',
+  'token.quantRange': '{min}到{max}次',
+  'token.nonGreedy': '非贪婪'
 };
 
 const EN: Record<MessageKey, string> = {
@@ -202,7 +231,21 @@ const EN: Record<MessageKey, string> = {
   'issue.unknownGroupRef': 'The replacement references a capture group that does not exist',
   'issue.partialSession': 'Matches are incomplete, so replacement was refused',
   'issue.malformedState': 'The shared link is corrupted and cannot be parsed',
-  'issue.unsupportedStateVersion': 'The shared link uses an unsupported version'
+  'issue.unsupportedStateVersion': 'The shared link uses an unsupported version',
+  'token.anyChar': 'any char',
+  'token.digit': 'digit',
+  'token.nonDigit': 'non-digit',
+  'token.wordChar': 'letter',
+  'token.nonWordChar': 'non-letter',
+  'token.whitespace': 'whitespace',
+  'token.nonWhitespace': 'non-whitespace',
+  'token.quantZeroOrMore': '0 or more',
+  'token.quantOneOrMore': '1 or more',
+  'token.quantZeroOrOne': '0 or 1',
+  'token.quantExactly': 'exactly {count}',
+  'token.quantAtLeast': '{min} or more',
+  'token.quantRange': '{min} to {max}',
+  'token.nonGreedy': 'non-greedy'
 };
 
 /** 语言 → 文案表。类型保证每种语言、每个 key 都在，缺一个就编译不过。 */
@@ -276,4 +319,42 @@ export function createTranslator(locale: Locale): (key: MessageKey, params?: Tra
  */
 export function flagMessage(locale: Locale, flag: RegexFlag): string {
   return translate(locale, ('flag.' + flag) as MessageKey);
+}
+
+/**
+ * 字符类别转义的图上标签（`\d` → 数字 / digit）。
+ *
+ * 返回 `null` 表示**没有专门词条**，调用方应退回原始写法（如 `\.`、`\a`）。
+ * 注意 `en` 也走同一张表：英文下这些语义与写法几乎等长，没必要特殊处理。
+ * 图上只留中文语义会丢失可逆性，所以原始写法由视图放进 `data-escaped`。
+ */
+const TOKEN_KEYS: Readonly<Record<string, MessageKey>> = Object.freeze({
+  d: 'token.digit',
+  D: 'token.nonDigit',
+  w: 'token.wordChar',
+  W: 'token.nonWordChar',
+  s: 'token.whitespace',
+  S: 'token.nonWhitespace'
+});
+
+export function tokenLabel(locale: Locale, escaped: string): string | null {
+  if (escaped === '.') return translate(locale, 'token.anyChar');
+  const key = TOKEN_KEYS[escaped];
+  return key === undefined ? null : translate(locale, key);
+}
+
+/** 量词的次数语义（按使用者要求：`+` 说「一次以上」、`*` 说「0次以上」，懒惰追加「非贪婪」）。 */
+export function quantifierLabel(
+  locale: Locale,
+  quantifier: { min: number; max: number | null; greedy: boolean }
+): string {
+  const { min, max, greedy } = quantifier;
+  let base: string;
+  if (min === 0 && max === null) base = translate(locale, 'token.quantZeroOrMore');
+  else if (min === 1 && max === null) base = translate(locale, 'token.quantOneOrMore');
+  else if (min === 0 && max === 1) base = translate(locale, 'token.quantZeroOrOne');
+  else if (max === null) base = translate(locale, 'token.quantAtLeast', { min });
+  else if (min === max) base = translate(locale, 'token.quantExactly', { count: min });
+  else base = translate(locale, 'token.quantRange', { min, max });
+  return greedy ? base : `${base}·${translate(locale, 'token.nonGreedy')}`;
 }

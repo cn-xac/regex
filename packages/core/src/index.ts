@@ -53,6 +53,19 @@ export { parsePatternInput } from './literal';
 
 export type { FlagsMergeStrategy, ParsedPatternInput, PatternInputOptions } from './literal';
 
+export { DEFAULT_LIMITS, compileCheck, matchAll } from './engine';
+
+export type {
+  CaptureGroup,
+  CompileCheckResult,
+  CompileOptions,
+  EngineLimits,
+  MatchOptions,
+  MatchSession,
+  MatchStats,
+  RegexMatch
+} from './engine';
+
 export {
   FALLBACK_LOCALE,
   MESSAGES,

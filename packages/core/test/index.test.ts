@@ -23,12 +23,14 @@ const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')) as {
 /** 手写期望清单：新增导出忘了登记进 index.ts 会红，反之漏登记也会红。 */
 const EXPECTED_VALUE_EXPORTS = [
   'CORE_VERSION',
+  'DEFAULT_LIMITS',
   'FALLBACK_LOCALE',
   'FLAG_ORDER',
   'MESSAGES',
   'PATTERN_METACHARACTERS',
   'SUPPORTED_LOCALES',
   'checkFlagSupport',
+  'compileCheck',
   'createTranslator',
   'emptyFlagSet',
   'escapeLiteral',
@@ -37,6 +39,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'formatFlags',
   'hasFlag',
   'isFlagSupported',
+  'matchAll',
   'normalizeFlags',
   'normalizeLocaleTag',
   'parseFlags',

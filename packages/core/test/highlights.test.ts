@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { matchAll } from '../src/engine';
 import type { MatchSession } from '../src/engine';
-import { computeHighlights, spansAtOffset, toLineColumns } from '../src/highlights';
+import { computeHighlights, spansAtOffset, toLineColumns, toRenderChunks } from '../src/highlights';
 import type { HighlightSpan } from '../src/highlights';
 
 function session(text: string, pattern: string, flags = 'g'): MatchSession {
@@ -150,6 +150,67 @@ describe('toLineColumns', () => {
     const positioned = toLineColumns('abc', computeHighlights(session('abc', 'a', '')));
     expect(positioned.every((p) => p.line === 1)).toBe(true);
     expect(positioned[0]?.column).toBe(1);
+  });
+});
+
+describe('toRenderChunks', () => {
+  const CASES: ReadonlyArray<[string, string, string]> = [
+    ['a1 b2', '\\w(\\d)', 'g'],
+    ['', 'x', 'g'],
+    ['ab', 'b*', 'g'],
+    ['😀ab', '(.)', ''],
+    ['2026-10-27', '(?<y>\\d{4})-(\\d{2})', 'g'],
+    ['aaa', 'a(a)?', 'g']
+  ];
+
+  it('片段拼回原文，不吞字符也不重复', () => {
+    for (const [text, pattern, flags] of CASES) {
+      const chunks = toRenderChunks(text, computeHighlights(session(text, pattern, flags)));
+      expect(chunks.map((c) => c.text).join(''), `text=${text}`).toBe(text);
+      // 片段必须连续无缝
+      for (let i = 1; i < chunks.length; i++) {
+        expect(chunks[i]?.start).toBe(chunks[i - 1]?.end);
+      }
+    }
+  });
+
+  it('每个 chunk 携带的 span 都真正覆盖它', () => {
+    for (const [text, pattern, flags] of CASES) {
+      const chunks = toRenderChunks(text, computeHighlights(session(text, pattern, flags)));
+      for (const chunk of chunks) {
+        for (const span of chunk.spans) {
+          if (span.start === span.end) {
+            expect(span.start).toBe(chunk.start);
+            continue;
+          }
+          expect(span.start <= chunk.start && chunk.end <= span.end).toBe(true);
+        }
+        expect([...chunk.spans].map((s) => s.depth)).toEqual(
+          [...chunk.spans].map((s) => s.depth).sort((a, b) => a - b)
+        );
+      }
+    }
+  });
+
+  it('零宽区间附着到所在片段，而不是被丢掉', () => {
+    const chunks = toRenderChunks('ab', computeHighlights(session('ab', 'b*', 'g')));
+    const withZeroWidth = chunks.filter((c) => c.spans.some((s) => s.start === s.end));
+    expect(withZeroWidth.length).toBeGreaterThan(0);
+  });
+
+  it('无匹配时整段一个片段；输出全冻结', () => {
+    const chunks = toRenderChunks('hello', computeHighlights(session('hello', 'zzz', 'g')));
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.text).toBe('hello');
+    expect(Object.isFrozen(chunks)).toBe(true);
+    expect(Object.isFrozen(chunks[0])).toBe(true);
+    expect(Object.isFrozen(chunks[0]?.spans)).toBe(true);
+  });
+
+  it('越界 span 不会撑破边界（视图可能传入编辑前的旧区间）', () => {
+    const spans = computeHighlights(session('abcdef', 'c(d)', ''));
+    const chunks = toRenderChunks('ab', spans);
+    expect(chunks.map((c) => c.text).join('')).toBe('ab');
   });
 });
 

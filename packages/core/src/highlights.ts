@@ -166,6 +166,60 @@ export function spansAtOffset(
   );
 }
 
+/** 渲染片段：一段连续文本 + 覆盖它的所有区间。视图按此线性铺 DOM，不必自己算边界。 */
+export interface RenderChunk {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+  /** 覆盖本片段的区间，按 depth 升序（视图取末位作主色，或用全部生成 data-* 索引）。 */
+  readonly spans: readonly HighlightSpan[];
+}
+
+/**
+ * 把 `text` 按所有 span 边界切成不重叠片段。
+ *
+ * 放 core 而不是让三个适配层各写一遍：边界收集、零宽附着、越界裁剪这几步一旦各写，
+ * 就会出现「同一 pattern 在 vue 里高亮对、在 react 里少一块」。视图侧只负责把 chunk
+ * 铺成节点，不再做任何区间运算。
+ *
+ * 不变量：`chunks.map(c => c.text).join('') === text`（不吞字符、不重复），测试钉住。
+ */
+export function toRenderChunks(
+  text: string,
+  spans: readonly HighlightSpan[]
+): readonly RenderChunk[] {
+  const bounds = new Set<number>([0, text.length]);
+  for (const span of spans) {
+    // 越界防御：视图传进来的 spans 可能来自另一份文本（用户刚编辑过）
+    if (span.start >= 0 && span.start <= text.length) bounds.add(span.start);
+    if (span.end >= 0 && span.end <= text.length) bounds.add(span.end);
+  }
+  const points = [...bounds].sort((a, b) => a - b);
+  const out: RenderChunk[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const start = points[i] as number;
+    const end = points[i + 1] as number;
+    if (end <= start) continue;
+    const covering = spans
+      .filter((s) => s.start < s.end && s.start <= start && end <= s.end)
+      .sort((a, b) => a.depth - b.depth);
+    // 零宽区间不产生片段，而是附着到它所在位置的片段上（否则用户看不到空匹配）
+    const atPoint = spans.filter((s) => s.start === s.end && s.start === start);
+    out.push(
+      Object.freeze({
+        text: text.slice(start, end),
+        start,
+        end,
+        spans: Object.freeze([...covering, ...atPoint])
+      })
+    );
+  }
+  if (out.length === 0) {
+    return Object.freeze([Object.freeze({ text: '', start: 0, end: 0, spans: Object.freeze([]) })]);
+  }
+  return Object.freeze(out);
+}
+
 /** 行起始偏移表。行终止符按 JS 的语义识别（含 \\r\\n 与 U+2028/U+2029）。 */
 function lineStartsOf(text: string): number[] {
   const starts: number[] = [0];

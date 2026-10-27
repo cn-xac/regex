@@ -59,6 +59,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'spansAtOffset',
   'stringifyAst',
   'toLineColumns',
+  'toRenderChunks',
   'tokenLabel',
   'translate',
   'unescapeLiteral',

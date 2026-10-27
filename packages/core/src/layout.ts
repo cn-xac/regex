@@ -217,15 +217,21 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const edges: DiagramEdge[] = [...inner.edges];
       const ah = 5;
 
-      // 回环：右端上行 → 水平跨过主体 → 左端下行回到主体入口
-      edges.push({ id: `${idPath}.r1`, from: { x: right, y: 0 }, to: { x: right, y: topY } });
+      // 弧的起落点取**被包元素的外缘**，而不是主体内容的 0 线：量化一个分组时，组框
+      // 为了让出 `#N` 标签行而向上扩到负 y，只有从框顶起落才是「弧包框」；反过来组内
+      // 含量词时弧在框内、框在外 —— 谁包谁由嵌套关系自动决定，不需要特判。
+      const frameTop = -inner.above;
+      const frameBottom = inner.height + inner.below;
+
+      // 回环：右端上行 → 水平跨过被包元素 → 左端下行回到入口
+      edges.push({ id: `${idPath}.r1`, from: { x: right, y: frameTop }, to: { x: right, y: topY } });
       edges.push({ id: `${idPath}.r2`, from: { x: right, y: topY }, to: { x: left, y: topY } });
-      edges.push({ id: `${idPath}.r3`, from: { x: left, y: topY }, to: { x: left, y: 0 } });
-      // 箭头朝向即贪婪性：greedy 的箭头落在左端、指向主体（优先再绕一次）；
-      // lazy 的箭头在右端、指离主体（优先结束重复）。
+      edges.push({ id: `${idPath}.r3`, from: { x: left, y: topY }, to: { x: left, y: frameTop } });
+      // 箭头朝向即贪婪性：greedy 的箭头落在左端、指向被包元素（优先再绕一次）；
+      // lazy 的箭头在右端、指离元素（优先结束重复）。
       if (greedy) {
-        edges.push({ id: `${idPath}.ah1`, from: { x: left - ah, y: -ah * 2 }, to: { x: left, y: -ah } });
-        edges.push({ id: `${idPath}.ah2`, from: { x: left + ah, y: -ah * 2 }, to: { x: left, y: -ah } });
+        edges.push({ id: `${idPath}.ah1`, from: { x: left - ah, y: frameTop - ah * 2 }, to: { x: left, y: frameTop - ah } });
+        edges.push({ id: `${idPath}.ah2`, from: { x: left + ah, y: frameTop - ah * 2 }, to: { x: left, y: frameTop - ah } });
       } else {
         edges.push({ id: `${idPath}.ah1`, from: { x: right - ah, y: topY + ah * 2 }, to: { x: right, y: topY + ah } });
         edges.push({ id: `${idPath}.ah2`, from: { x: right + ah, y: topY + ah * 2 }, to: { x: right, y: topY + ah } });
@@ -252,12 +258,12 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
 
       let below = inner.below;
       if (canSkip) {
-        // min === 0 的「可以整段跳过」走下方旁路，不与回环抢上方空间。
+        // min === 0 的「可以整段跳过」走下方旁路，不与回环抢上方空间；起落点同样用框底。
         const skipDepth = inner.below + 4 + arcH;
         const sy = inner.height + skipDepth;
-        edges.push({ id: `${idPath}.s1`, from: { x: left, y: inner.height }, to: { x: left, y: sy } });
+        edges.push({ id: `${idPath}.s1`, from: { x: left, y: frameBottom }, to: { x: left, y: sy } });
         edges.push({ id: `${idPath}.s2`, from: { x: left, y: sy }, to: { x: right, y: sy } });
-        edges.push({ id: `${idPath}.s3`, from: { x: right, y: sy }, to: { x: right, y: inner.height } });
+        edges.push({ id: `${idPath}.s3`, from: { x: right, y: sy }, to: { x: right, y: frameBottom } });
         below = skipDepth;
       }
 

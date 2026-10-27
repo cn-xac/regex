@@ -213,6 +213,46 @@ describe('layout 不变量', () => {
     expect(diagramFor('a+').edges.filter((e) => e.id.endsWith('.s2'))).toHaveLength(0);
   });
 
+  /** 使用者反馈：量化一个分组时，回环与组框要互相包裹 —— 此时弧在外、框在内。 */
+  it('量化分组时回环包住组框（竖直段从组框顶边起落，横向跨过整框）', () => {
+    const d = diagramFor('(a|b)*?');
+    const container = d.boxes.find((b) => b.tone === 'group');
+    const up = d.edges.find((e) => e.id.endsWith('.r1'));
+    const down = d.edges.find((e) => e.id.endsWith('.r3'));
+    const prefix = d.boxes.find((b) => b.tone === 'tagGroupPrefix');
+    const qLabel = d.boxes.find((b) => b.tone === 'tagQuantifier');
+    if (container === undefined || up === undefined || down === undefined) {
+      throw new Error('缺组框或回环边');
+    }
+    if (prefix === undefined || qLabel === undefined) throw new Error('缺组标签或次数标签');
+    // 弧的起落点必须是**组框顶边**，而不是主体内容的 0 线
+    expect(up.from.y).toBe(container.y);
+    expect(down.to.y).toBe(container.y);
+    expect(up.to.y).toBeLessThan(container.y);
+    // 弧的右侧竖直段贴在组框右缘，横向跨过整个框
+    expect(up.from.x).toBeCloseTo(container.x + container.w, 1);
+    expect(down.to.x).toBeCloseTo(container.x, 1);
+    // 层位：次数标签（弧上）→ 组框顶 → 组标签（框内顶部），三者不重叠
+    expect(qLabel.y + qLabel.h).toBeLessThanOrEqual(prefix.y);
+    expect(prefix.y).toBeGreaterThanOrEqual(container.y);
+  });
+
+  /** 反过来的嵌套：组内含量词时，弧必须留在框内，不能外溢。 */
+  it('组内含量词时回环留在框内，不外溢', () => {
+    const d = diagramFor('(?<x>a+)');
+    const container = d.boxes.find((b) => b.tone === 'group');
+    if (container === undefined) throw new Error('缺组框');
+    const arc = d.edges.filter((e) => /\.r[123]$/.test(e.id));
+    expect(arc.length).toBeGreaterThan(0);
+    for (const e of arc) {
+      expect(e.from.x).toBeGreaterThanOrEqual(container.x - 0.5);
+      expect(e.to.x).toBeLessThanOrEqual(container.x + container.w + 0.5);
+    }
+    // 框顶仍在弧之上（组标签占最外层）
+    const prefix = d.boxes.find((b) => b.tone === 'tagGroupPrefix');
+    expect(prefix !== undefined && prefix.y <= Math.min(...arc.map((e) => Math.min(e.from.y, e.to.y)))).toBe(true);
+  });
+
   /** 使用者反馈 4：内容与分组框之间留白，且内容在内容区垂直居中。 */
   it('组内容四周留白、左右对称，且不与标签重叠', () => {
     const boxes = boxesOf('(?<x>ab)');

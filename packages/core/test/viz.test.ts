@@ -229,9 +229,9 @@ describe('layout 不变量', () => {
     expect(up.from.y).toBe(container.y);
     expect(down.to.y).toBe(container.y);
     expect(up.to.y).toBeLessThan(container.y);
-    // 弧的右侧竖直段贴在组框右缘，横向跨过整个框
-    expect(up.from.x).toBeCloseTo(container.x + container.w, 1);
-    expect(down.to.x).toBeCloseTo(container.x, 1);
+    // 弧的右侧竖直段必须**在组框右缘之外**（向外让开，不与框边重合）
+    expect(up.from.x).toBeGreaterThan(container.x + container.w - 0.01);
+    expect(down.to.x).toBeLessThan(container.x + 0.01);
     // 层位：次数标签（弧上）→ 组框顶 → 组标签（框内顶部），三者不重叠
     expect(qLabel.y + qLabel.h).toBeLessThanOrEqual(prefix.y);
     expect(prefix.y).toBeGreaterThanOrEqual(container.y);
@@ -253,14 +253,28 @@ describe('layout 不变量', () => {
     expect(prefix !== undefined && prefix.y <= Math.min(...arc.map((e) => Math.min(e.from.y, e.to.y)))).toBe(true);
   });
 
-  it('中文标签按双宽计宽且不左溢，旁路弧带箭头', () => {
+  it('中文标签按双宽 + 小一号字计宽，且不撑开序列占位', () => {
     const tag = boxesOf('a+?').find((b) => b.tone === 'tagQuantifier');
     if (tag === undefined) throw new Error('缺次数标签');
-    // 「一次以上·非贪婪」为宽字符，按双宽算至少 15 个单位；旧实现按 1 倍估 → 文字溢出被裁
-    expect(tag.w).toBeGreaterThanOrEqual(14 * DEFAULT_METRICS.charWidth);
+    // 宽字符按双宽计（否则文字溢出被 viewBox 裁），再按较小字号折算（否则撑宽序列）
+    expect(tag.fontSize).toBe(DEFAULT_METRICS.tagFontSize);
+    expect(tag.fontSize).toBeLessThan(DEFAULT_METRICS.fontSize);
+    const ratio = DEFAULT_METRICS.tagFontSize / DEFAULT_METRICS.fontSize;
+    expect(tag.w).toBeGreaterThanOrEqual(14 * DEFAULT_METRICS.charWidth * ratio);
     expect(tag.x).toBeGreaterThanOrEqual(0);
-    // 旁路弧必须带箭头，否则那条 U 形线读起来像框的残影
-    expect(boxesOf('a*').length).toBeGreaterThan(0);
+    // 关键回归：标签不得把后续元素推远，序列间距只由元素本身与 gapX 决定
+    const d = diagramFor('(a|b)*?c+');
+    const group = d.boxes.find((b) => b.tone === 'group');
+    const c = d.boxes.find((b) => b.label === 'c');
+    if (group === undefined || c === undefined) throw new Error('缺组框或 c');
+    expect(c.x - (group.x + group.w)).toBeLessThanOrEqual(DEFAULT_METRICS.gapX + 12);
+    // 回环向外让开，不得压在组框边线上（否则像叠了第二个框）
+    const arc = d.edges.filter((e) => /\.r[13]$/.test(e.id));
+    expect(arc.length).toBeGreaterThan(0);
+    expect(
+      arc.every((e) => e.from.x <= group.x + 0.01 || e.from.x >= group.x + group.w - 0.01)
+    ).toBe(true);
+    // 旁路弧仍要带箭头
     expect(diagramFor('a*').edges.filter((e) => e.id.includes('.sh')).length).toBe(2);
     expect(diagramFor('a+').edges.filter((e) => e.id.includes('.sh'))).toHaveLength(0);
   });

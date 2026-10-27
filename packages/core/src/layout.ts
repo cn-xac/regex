@@ -43,6 +43,8 @@ export interface DiagramBox {
   readonly source?: SourceRange;
   /** 原始转义写法（如 `\d`）：图上显示本地化语义，可逆信息由视图挂到 data-* 上。 */
   readonly escaped?: string;
+  /** 标注盒用较小字号；未设时 painter 用主体字号。 */
+  readonly fontSize?: number;
   readonly depth: number;
 }
 
@@ -61,6 +63,10 @@ export interface DiagramMetrics {
   readonly gapX: number;
   readonly gapY: number;
   readonly minWidth: number;
+  /** 主体文字字号。 */
+  readonly fontSize: number;
+  /** 标注文字字号（次数、组编号）。**小一号**是有意的：中文标签按主体字号会宽到把序列撑开。 */
+  readonly tagFontSize: number;
 }
 
 export interface LayoutOptions {
@@ -84,7 +90,9 @@ export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
   padY: 9,
   gapX: 10,
   gapY: 14,
-  minWidth: 26
+  minWidth: 26,
+  fontSize: 13,
+  tagFontSize: 11
 });
 
 interface Ctx {
@@ -124,6 +132,11 @@ function textUnits(label: string): number {
 
 function leafWidth(label: string, m: DiagramMetrics): number {
   return Math.max(m.minWidth, textUnits(label) * m.charWidth + m.padX * 2);
+}
+
+/** 标注文字的等效宽度：按 tagFontSize 与主体字号的比例折算（小一号 → 更窄）。 */
+function tagWidth(label: string, m: DiagramMetrics): number {
+  return textUnits(label) * m.charWidth * (m.tagFontSize / m.fontSize);
 }
 
 /** 分组的框上标签：捕获组带 `#N`，非捕获与断言明确不带编号。 */
@@ -193,7 +206,8 @@ function box(
   tone: BoxTone,
   depth: number,
   source?: SourceRange,
-  escaped?: string
+  escaped?: string,
+  fontSize?: number
 ): DiagramBox {
   return Object.freeze({
     id,
@@ -205,7 +219,8 @@ function box(
     tone,
     depth,
     ...(source === undefined ? {} : { source }),
-    ...(escaped === undefined ? {} : { escaped })
+    ...(escaped === undefined ? {} : { escaped }),
+    ...(fontSize === undefined ? {} : { fontSize })
   });
 }
 
@@ -225,8 +240,6 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const arcH = m.lineHeight + 4;
       const base = inner.above + 4; // 回环水平段的上沿（从 inner.above 起叠，避免与组标签同层）
       const topY = -(base + arcH);
-      const left = 0;
-      const right = inner.width;
       const boxes: DiagramBox[] = [...inner.boxes];
       const edges: DiagramEdge[] = [...inner.edges];
       const ah = 5;
@@ -236,6 +249,12 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       // 含量词时弧在框内、框在外 —— 谁包谁由嵌套关系自动决定，不需要特判。
       const frameTop = -inner.above;
       const frameBottom = inner.height + inner.below;
+      // 弧必须**向外让开**：left/right 若正好等于组框左右边，回环与旁路就会和框边重合，
+      // 看起来像框上又叠了一个框。
+      const inset = 6;
+      const left = -inset;
+      const right = inner.width + inset;
+      const slotWidth = inner.width + inset * 2;
 
       // 回环：右端上行 → 水平跨过被包元素 → 左端下行回到入口
       edges.push({ id: `${idPath}.r1`, from: { x: right, y: frameTop }, to: { x: right, y: topY } });
@@ -253,12 +272,13 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
 
       let labelW = 0;
       if (label !== '') {
-        labelW = textUnits(label) * m.charWidth;
-        // 标签比被包元素宽时居中于**总宽**，否则会从左侧溢出被 viewBox 裁掉
+        labelW = tagWidth(label, m);
+        // 居中于弧跨距；**允许左右溢出** —— 标签撑宽会把序列里的后续元素推老远
+        // （`(a|b)*?c+` 里 c 曾被推走），占位宽度只由被包元素与弧 inset 决定。
         boxes.push(
           box(
             `${idPath}.q`,
-            (Math.max(right, labelW) - labelW) / 2,
+            (slotWidth - labelW) / 2,
             topY - m.lineHeight,
             labelW,
             m.lineHeight,
@@ -266,7 +286,8 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
             'tagQuantifier',
             depth,
             { start: node.start, end: node.end },
-            q?.source
+            q?.source,
+            m.tagFontSize
           )
         );
       }
@@ -288,7 +309,8 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       return {
         boxes,
         edges,
-        width: Math.max(inner.width, labelW),
+        // 占位宽只由被包元素 + 弧 inset 决定，**不含标签宽**（标签可溢出，见上注释）
+        width: slotWidth,
         height: inner.height,
         above: base + arcH + (label === '' ? 0 : m.lineHeight),
         below
@@ -301,7 +323,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const padY = ctx.m.padY;
       const tagH = ctx.m.lineHeight;
       const tag = groupTag(node);
-      const tagW = leafWidth(tag, ctx.m);
+      const tagW = tagWidth(tag, ctx.m) + 4;
       // 标签行叠在 inner.above 之上：组内的回环弧占了一层，`#N` 必须再高一层才不会压上去。
       const tagBase = inner.above + 4;
       const containerY = -(tagBase + tagH + padY);
@@ -328,7 +350,9 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
             tag,
             'tagGroupPrefix',
             depth,
-            { start: node.start, end: node.end }
+            { start: node.start, end: node.end },
+            undefined,
+            ctx.m.tagFontSize
           ),
           ...shift(inner.boxes, padX, 0)
         ],

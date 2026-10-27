@@ -132,11 +132,11 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
     }
     if (box.label !== '') {
       // 垂直居中只做一次：交给 dominant-baseline，不再叠加半个字号的位移。
-      // 之前这里既加 size*0.35 又在 style.css 里写 dominant-baseline: middle，
-      // 两者叠成就成了「文字整体偏下」。
+      // 标注盒用几何层带来的较小字号（字号属于排版决定，painter 不自行发明）。
+      const fs = box.fontSize ?? size;
       parts.push(
         `<text x="${round(box.x + (tag ? 0 : 6))}" y="${round(box.y + box.h / 2)}"` +
-          ` dominant-baseline="central" text-anchor="start" fill="${paint.text}">` +
+          ` font-size="${fs}" dominant-baseline="central" text-anchor="start" fill="${paint.text}">` +
           `${escapeXml(box.label)}</text>`
       );
     }
@@ -192,7 +192,11 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
       ops.push({ kind: 'strokeRect', x: round(box.x), y: round(box.y), w: round(box.w), h: round(box.h) });
     }
     if (box.label !== '') {
-      ops.push({ kind: 'setFill', value: paint.text });
+      // 字号随几何层给出的值下发，保证 Canvas 与 SVG 用同一套字号
+      ops.push(
+        { kind: 'setFont', value: `${box.fontSize ?? size}px ${font}` },
+        { kind: 'setFill', value: paint.text }
+      );
       ops.push({
         kind: 'fillText',
         text: box.label,

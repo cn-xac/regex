@@ -66,6 +66,10 @@ export type {
   RegexMatch
 } from './engine';
 
+export { collectNodes, nodeRange, parsePattern, stringifyAst } from './parser';
+
+export type { AstNode, AstNodeKind, GroupKind, ParseResult, Quantifier } from './parser';
+
 export {
   FALLBACK_LOCALE,
   MESSAGES,

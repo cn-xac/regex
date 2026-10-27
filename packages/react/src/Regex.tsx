@@ -3,19 +3,23 @@ import type { ChangeEvent } from 'react';
 
 import {
   FLAG_ORDER,
+  chunkPresentation,
+  computeHighlights,
   flagMessage,
   hasFlag,
   isFlagSupported,
   layoutRailroad,
+  matchAll,
   parseFlags,
   parsePattern,
   parsePatternInput,
   renderSvg,
   resolveLocale,
+  toRenderChunks,
   translate,
   withFlag
 } from '@x-ac/regex-core';
-import type { Locale, MessageKey, RegexFlag, SvgTheme } from '@x-ac/regex-core';
+import type { Locale, MessageKey, RegexFlag, SvgTheme, TranslateParams } from '@x-ac/regex-core';
 
 import '@x-ac/regex-core/style.css';
 
@@ -32,12 +36,15 @@ import '@x-ac/regex-core/style.css';
 export interface RegexProps {
   pattern?: string;
   flags?: string;
+  /** 测试文本。 */
+  text?: string;
   /** 语言候选（宿主传 `[...navigator.languages]`）；core 不读 navigator，故在此注入。 */
   localeCandidates?: readonly string[];
   /** 导出的 SVG 配色。宿主想跟随系统时自行传值（core 不读 matchMedia）。 */
   svgTheme?: SvgTheme;
   onPatternChange?: (value: string) => void;
   onFlagsChange?: (value: string) => void;
+  onTextChange?: (value: string) => void;
 }
 
 /** 组件实例句柄：透传到根 `div`，供宿主定位与测量。 */
@@ -47,10 +54,12 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
   const {
     pattern = '',
     flags = 'g',
+    text = '',
     localeCandidates = [],
     svgTheme = 'light',
     onPatternChange,
-    onFlagsChange
+    onFlagsChange,
+    onTextChange
   } = props;
 
   // 依赖用 join 后的字符串而非数组本身：调用方常传字面量数组，引用每轮都变。
@@ -59,10 +68,18 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
     () => resolveLocale(candidateKey === '' ? [] : candidateKey.split(',')),
     [candidateKey]
   );
-  const t = useMemo<(key: MessageKey) => string>(() => (key) => translate(locale, key), [locale]);
+  const t = useMemo<(key: MessageKey, params?: TranslateParams) => string>(
+    () => (key, params) => translate(locale, key, params),
+    [locale]
+  );
 
   const [source, setSource] = useState<string>(pattern);
   const [flagsModel, setFlagsModel] = useState<string>(flags);
+  const [textModel, setTextModel] = useState<string>(text);
+
+  useEffect(() => {
+    setTextModel(text);
+  }, [text]);
 
   useEffect(() => {
     setSource(pattern);
@@ -94,6 +111,25 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
     if (!result.ok) return '';
     return renderSvg(layoutRailroad(result.ast, { locale }), { theme: svgTheme });
   }, [parsed, svgTheme, locale]);
+
+  /** 匹配结果 → 区间 → 渲染片段；三步全在 core，视图只负责铺节点。 */
+  const session = useMemo(
+    () => matchAll(textModel, parsed.pattern, parsed.flags),
+    [textModel, parsed]
+  );
+  const chunks = useMemo(
+    () => toRenderChunks(textModel, computeHighlights(session)),
+    [textModel, session]
+  );
+
+  const onTextInput = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>): void => {
+      const value = event.target.value;
+      setTextModel(value);
+      onTextChange?.(value);
+    },
+    [onTextChange]
+  );
 
   const onSourceInput = useCallback(
     (event: ChangeEvent<HTMLInputElement>): void => {
@@ -172,6 +208,38 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
           ))}
         </ul>
       ) : null}
+
+      <label className="x-ac-regex-field">
+        <span>{t('field.text')}</span>
+        <textarea
+          className="x-ac-regex-mono x-ac-regex-input"
+          rows={4}
+          value={textModel}
+          spellCheck={false}
+          onChange={onTextInput}
+        />
+      </label>
+
+      <p className="x-ac-regex-summary" data-truncated={session.truncated ? 'true' : 'false'}>
+        {t('view.matchCount', { count: session.matches.length })}
+        {session.truncated ? ` · ${t('view.truncated')}` : ''}
+      </p>
+
+      <pre className="x-ac-regex-highlight x-ac-regex-mono">
+        {chunks.map((chunk) => {
+          const pres = chunkPresentation(chunk);
+          return (
+            <span
+              key={chunk.start}
+              className={pres.classes.join(' ')}
+              data-depth={pres.depth}
+              data-groups={pres.groupOrdinals.length > 0 ? pres.groupOrdinals.join(',') : undefined}
+            >
+              {chunk.text}
+            </span>
+          );
+        })}
+      </pre>
 
       <div className="x-ac-regex-diagram" data-backend="svg">
         {diagram === '' ? (

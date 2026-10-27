@@ -78,9 +78,16 @@ export { applyCanvasOps, escapeXml, renderCanvasOps, renderSvg } from './painter
 
 export type { CanvasOp, PaintContext, PaintOptions, SvgTheme } from './painter';
 
-export { computeHighlights, spansAtOffset, toLineColumns, toRenderChunks } from './highlights';
+export {
+  chunkPresentation,
+  computeHighlights,
+  spansAtOffset,
+  toLineColumns,
+  toRenderChunks
+} from './highlights';
 
 export type {
+  ChunkPresentation,
   HighlightOptions,
   HighlightSpan,
   PositionedSpan,

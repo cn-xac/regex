@@ -32,6 +32,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'SUPPORTED_LOCALES',
   'applyCanvasOps',
   'checkFlagSupport',
+  'chunkPresentation',
   'collectNodes',
   'compileCheck',
   'computeHighlights',

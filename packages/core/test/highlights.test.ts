@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import { matchAll } from '../src/engine';
 import type { MatchSession } from '../src/engine';
-import { computeHighlights, spansAtOffset, toLineColumns, toRenderChunks } from '../src/highlights';
+import {
+  chunkPresentation,
+  computeHighlights,
+  spansAtOffset,
+  toLineColumns,
+  toRenderChunks
+} from '../src/highlights';
+import type { RenderChunk } from '../src/highlights';
 import type { HighlightSpan } from '../src/highlights';
 
 function session(text: string, pattern: string, flags = 'g'): MatchSession {
@@ -211,6 +218,40 @@ describe('toRenderChunks', () => {
     const spans = computeHighlights(session('abcdef', 'c(d)', ''));
     const chunks = toRenderChunks('ab', spans);
     expect(chunks.map((c) => c.text).join('')).toBe('ab');
+  });
+});
+
+describe('chunkPresentation', () => {
+  it('整段匹配与最深组各自给类名，层级来自最深组', () => {
+    const chunks = toRenderChunks('a1', computeHighlights(session('a1', '\\w(\\d)', '')));
+    const digit = chunks.find((c) => c.text === '1');
+    if (digit === undefined) throw new Error('未切出目标片段');
+    const pres = chunkPresentation(digit);
+    expect(pres.classes).toContain('x-ac-regex-hl');
+    expect(pres.classes).toContain('x-ac-regex-hl--match');
+    expect(pres.classes).toContain('x-ac-regex-hl--group');
+    expect(pres.groupOrdinals).toEqual([1]);
+    expect(pres.matchOrdinals).toEqual([0]);
+  });
+
+  it('命名组用 named-group 类，未覆盖片段只有基类', () => {
+    const chunks = toRenderChunks('a-', computeHighlights(session('a-', '(?<x>a)-', '')));
+    const named = chunkPresentation(chunks[0] as RenderChunk);
+    expect(named.classes).toContain('x-ac-regex-hl--named-group');
+    const plain = toRenderChunks('zz', computeHighlights(session('zz', 'a', 'g')));
+    expect(chunkPresentation(plain[0] as RenderChunk).classes).toEqual(['x-ac-regex-hl']);
+  });
+
+  it('零宽匹配标 is-zero-width，视图据此画记号', () => {
+    const chunks = toRenderChunks('ab', computeHighlights(session('ab', 'b*', 'g')));
+    expect(chunks.some((c) => chunkPresentation(c).zeroWidth)).toBe(true);
+  });
+
+  it('输出冻结', () => {
+    const chunks = toRenderChunks('a1', computeHighlights(session('a1', '(\\w)(\\d)', '')));
+    const pres = chunkPresentation(chunks[0] as RenderChunk);
+    expect(Object.isFrozen(pres)).toBe(true);
+    expect(Object.isFrozen(pres.classes)).toBe(true);
   });
 });
 

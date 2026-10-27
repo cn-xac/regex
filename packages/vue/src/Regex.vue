@@ -14,43 +14,59 @@
 import { computed, ref, watch } from 'vue';
 import {
   FLAG_ORDER,
+  chunkPresentation,
+  computeHighlights,
   flagMessage,
   hasFlag,
   isFlagSupported,
   layoutRailroad,
+  matchAll,
   parseFlags,
   parsePattern,
   parsePatternInput,
   renderSvg,
   resolveLocale,
+  toRenderChunks,
   translate,
   withFlag
 } from '@x-ac/regex-core';
-import type { Locale, MessageKey, RegexFlag, SvgTheme } from '@x-ac/regex-core';
+import type { Locale, MessageKey, RegexFlag, SvgTheme, TranslateParams } from '@x-ac/regex-core';
 import '@x-ac/regex-core/style.css';
 
 const props = withDefaults(
   defineProps<{
     pattern?: string;
     flags?: string;
+    /** 测试文本。 */
+    text?: string;
     /** 语言候选（宿主传 `[...navigator.languages]`）；core 不读 navigator，故在此注入。 */
     localeCandidates?: readonly string[];
     /** 导出的 SVG 配色。宿主想跟随系统时自行传值（core 不读 matchMedia）。 */
     svgTheme?: SvgTheme;
   }>(),
-  { pattern: '', flags: 'g', localeCandidates: () => [], svgTheme: 'light' }
+  { pattern: '', flags: 'g', text: '', localeCandidates: () => [], svgTheme: 'light' }
 );
 
 const emit = defineEmits<{
   (event: 'update:pattern', value: string): void;
   (event: 'update:flags', value: string): void;
+  (event: 'update:text', value: string): void;
 }>();
 
 const locale = computed<Locale>(() => resolveLocale(props.localeCandidates));
-const t = (key: MessageKey): string => translate(locale.value, key);
+const t = (key: MessageKey, params?: TranslateParams): string =>
+  translate(locale.value, key, params);
 
 const source = ref<string>(props.pattern);
 const flagsModel = ref<string>(props.flags);
+const textModel = ref<string>(props.text);
+
+watch(
+  () => props.text,
+  (value) => {
+    textModel.value = value;
+  }
+);
 
 watch(
   () => props.pattern,
@@ -76,6 +92,17 @@ const parsed = computed(() =>
 );
 
 const issues = computed(() => [...parsed.value.issues, ...parseFlags(parsed.value.flags).issues]);
+
+/** 匹配结果 → 区间 → 渲染片段；三者全在 core，视图只负责铺节点。 */
+const session = computed(() => matchAll(textModel.value, parsed.value.pattern, parsed.value.flags));
+const chunks = computed(() => toRenderChunks(textModel.value, computeHighlights(session.value)));
+
+function onTextInput(event: Event): void {
+  const target = event.target as HTMLTextAreaElement | null;
+  if (target === null) return;
+  textModel.value = target.value;
+  emit('update:text', target.value);
+}
 
 /** 铁路图 SVG。pattern 非法（或被复验拒绝）时为空串，界面退回占位提示。 */
 const diagram = computed<string>(() => {
@@ -152,6 +179,30 @@ function toggleFlag(flag: RegexFlag): void {
         <span>{{ issue.message }}</span>
       </li>
     </ul>
+
+    <label class="x-ac-regex-field">
+      <span>{{ t('field.text') }}</span>
+      <textarea
+        class="x-ac-regex-mono x-ac-regex-input"
+        rows="4"
+        :value="textModel"
+        spellcheck="false"
+        @input="onTextInput"
+      />
+    </label>
+
+    <p class="x-ac-regex-summary" :data-truncated="session.truncated ? 'true' : 'false'">
+      {{ t('view.matchCount', { count: session.matches.length }) }}
+      <template v-if="session.truncated">· {{ t('view.truncated') }}</template>
+    </p>
+
+    <pre class="x-ac-regex-highlight x-ac-regex-mono"><span
+      v-for="chunk in chunks"
+      :key="chunk.start"
+      :class="chunkPresentation(chunk).classes"
+      :data-depth="chunkPresentation(chunk).depth"
+      :data-groups="chunkPresentation(chunk).groupOrdinals.join(',') || undefined"
+      >{{ chunk.text }}</span></pre>
 
     <div class="x-ac-regex-diagram" data-backend="svg">
       <!-- eslint-disable-next-line vue/html-self-closing -->

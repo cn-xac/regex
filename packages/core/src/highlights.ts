@@ -220,6 +220,49 @@ export function toRenderChunks(
   return Object.freeze(out);
 }
 
+/** 片段的呈现决定：类名、层级、组号。放 core 是为了让三个适配层渲染出完全一样的效果。 */
+export interface ChunkPresentation {
+  /** 直接可用于 `class` 的类名数组（含基类）。 */
+  readonly classes: readonly string[];
+  /** 供 `data-depth` 使用，CSS 按它取层级色。 */
+  readonly depth: number;
+  readonly groupOrdinals: readonly number[];
+  readonly matchOrdinals: readonly number[];
+  readonly zeroWidth: boolean;
+}
+
+/**
+ * 决定一个片段该怎么画：整段匹配打底色，最深的组决定层级色，零宽匹配加一个
+ * 不占宽度的记号（否则用户看不见空匹配）。
+ *
+ * 类名与 core 的 `style.css` 同源，视图侧不再自己拼字符串。
+ */
+export function chunkPresentation(chunk: RenderChunk): ChunkPresentation {
+  const covering = chunk.spans.filter((s) => s.start < s.end);
+  const zeroWidth = chunk.spans.some((s) => s.start === s.end);
+  const matchSpan = covering.find((s) => s.kind === 'match') ?? null;
+  const groupSpans = covering.filter((s) => s.kind !== 'match');
+  let deepest: HighlightSpan | null = null;
+  for (const span of groupSpans) {
+    if (deepest === null || span.depth > deepest.depth) deepest = span;
+  }
+
+  const classes: string[] = ['x-ac-regex-hl'];
+  if (matchSpan !== null) classes.push('x-ac-regex-hl--match');
+  if (deepest !== null) {
+    classes.push(deepest.kind === 'named-group' ? 'x-ac-regex-hl--named-group' : 'x-ac-regex-hl--group');
+  }
+  if (zeroWidth) classes.push('is-zero-width');
+
+  return Object.freeze({
+    classes: Object.freeze(classes),
+    depth: deepest?.depth ?? 0,
+    groupOrdinals: Object.freeze(groupSpans.map((s) => s.groupOrdinal)),
+    matchOrdinals: Object.freeze(matchSpan === null ? [] : [matchSpan.ordinal]),
+    zeroWidth
+  });
+}
+
 /** 行起始偏移表。行终止符按 JS 的语义识别（含 \\r\\n 与 U+2028/U+2029）。 */
 function lineStartsOf(text: string): number[] {
   const starts: number[] = [0];

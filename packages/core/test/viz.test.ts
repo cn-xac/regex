@@ -173,21 +173,44 @@ describe('layout 不变量', () => {
     expect(tags('(?:a)(?=b)(?<=c)(?!d)')).toEqual(['(?:', '(?=', '(?<=', '(?!']);
   });
 
-  /** 使用者反馈 3 的另一半：次数说人话，且放在内容后面而不是浮在上方。 */
-  it('次数标识跟在内容右侧，用「一次以上 / 0次以上」的说法', () => {
-    const plus = boxesOf('a+');
-    const body = plus.find((b) => b.label === 'a');
-    const tag = plus.find((b) => b.tone === 'tagQuantifier');
+  /** 使用者反馈 3 的另一半：次数与贪婪性由回环箭头表达，不摆一行文字在屁股后面。 */
+  it('次数与贪婪性走回环箭头：弧包住主体、次数写在弧上、箭头朝向区分贪懒', () => {
+    const plus = diagramFor('a+');
+    const body = plus.boxes.find((b) => b.label === 'a');
+    const tag = plus.boxes.find((b) => b.tone === 'tagQuantifier');
     expect(tag?.label).toBe('一次以上');
-    expect(body !== undefined && tag !== undefined && tag.x >= body.x + body.w - 1).toBe(true);
-    // 与主体同一水平带（不再抬高基线）
-    expect(body !== undefined && tag !== undefined && Math.abs((tag.y + tag.h / 2) - (body.y + body.h / 2)) < 1).toBe(true);
-    expect(boxesOf('a*').find((b) => b.tone === 'tagQuantifier')?.label).toBe('0次以上');
-    expect(boxesOf('a?').find((b) => b.tone === 'tagQuantifier')?.label).toBe('0或1次');
-    expect(boxesOf('a{3}').find((b) => b.tone === 'tagQuantifier')?.label).toBe('恰好3次');
-    expect(boxesOf('a{2,}').find((b) => b.tone === 'tagQuantifier')?.label).toBe('2次以上');
-    expect(boxesOf('a{2,4}').find((b) => b.tone === 'tagQuantifier')?.label).toBe('2到4次');
-    expect(boxesOf('a+?').find((b) => b.tone === 'tagQuantifier')?.label).toBe('一次以上·非贪婪');
+    if (body === undefined || tag === undefined) throw new Error('缺主体或次数标签');
+    // 次数标签落在主体上方的弧段附近，而不是右侧
+    expect(tag.y + tag.h).toBeLessThanOrEqual(body.y + 1);
+    expect(Math.abs(tag.x + tag.w / 2 - (body.x + body.w / 2))).toBeLessThan(body.w);
+    // 回环三段（右上行 / 水平跨 / 左下行）都在主体上方
+    const arc = plus.edges.filter((e) => /\.r[123]$/.test(e.id));
+    expect(arc).toHaveLength(3);
+    expect(arc.every((e) => Math.min(e.from.y, e.to.y) <= body.y + 1)).toBe(true);
+    // 箭头：贪婪落在左端指向主体，非贪婪落在右端指离主体，位置必须不同
+    const greedyArrowX = plus.edges.filter((e) => e.id.includes('.ah')).map((e) => e.to.x);
+    const lazyArrowX = diagramFor('a+?').edges.filter((e) => e.id.includes('.ah')).map((e) => e.to.x);
+    expect(Math.max(...greedyArrowX)).toBeLessThan(Math.min(...lazyArrowX));
+    // 文案仍按说话法
+    expect(tag.escaped).toBe('+');
+    const labelOf = (p: string) => diagramFor(p).boxes.find((b) => b.tone === 'tagQuantifier')?.label;
+    expect(labelOf('a*')).toBe('0次以上');
+    expect(labelOf('a?')).toBe('0或1次');
+    expect(labelOf('a{3}')).toBe('恰好3次');
+    expect(labelOf('a{2,}')).toBe('2次以上');
+    expect(labelOf('a{2,4}')).toBe('2到4次');
+    expect(labelOf('a+?')).toBe('一次以上·非贪婪');
+  });
+
+  it('min 为 0 的量词在主体下方画出旁路弧（表示可整段跳过）', () => {
+    const skip = diagramFor('a*');
+    const body = skip.boxes.find((b) => b.label === 'a');
+    const bypass = skip.edges.filter((e) => e.id.endsWith('.s2'));
+    expect(bypass).toHaveLength(1);
+    if (body === undefined) throw new Error('缺主体');
+    expect(bypass[0]?.from.y).toBeGreaterThan(body.y + body.h - 1);
+    // `+` 的 min 是 1，不该有旁路
+    expect(diagramFor('a+').edges.filter((e) => e.id.endsWith('.s2'))).toHaveLength(0);
   });
 
   /** 使用者反馈 4：内容与分组框之间留白，且内容在内容区垂直居中。 */
@@ -238,14 +261,21 @@ describe('layout 不变量', () => {
       const box = d.boxes.find((b) => b.label === label);
       return box === undefined ? Number.NaN : Math.round((box.y + box.h / 2) * 100) / 100;
     };
-    // 量词改为跟在右侧：占宽度、**不占高度**（这正是「不压低基线」的表达）
-    expect(quantified.width).toBeGreaterThan(bare.width);
-    expect(quantified.height).toBe(bare.height);
+    // 回环需要画布空间，图会变高；不变量是**主体中心仍对齐**（上一条已测），
+    // 而不是图总高不变 —— 弧与组标签都画在主体上方，不参与主体的垂直分配。
+    expect(quantified.height).toBeGreaterThan(bare.height);
     expect(center(quantified, 'a')).toBe(center(quantified, 'b'));
     expect(center(bare, 'a')).toBe(center(bare, 'b'));
+    // 次数标签落在主体上方；而组标签必须再高一层，否则会和组内元素的回环弧叠在一起
     const tag = quantified.boxes.find((b) => b.tone === 'tagQuantifier');
     const body = quantified.boxes.find((b) => b.label === 'a');
-    expect(tag !== undefined && body !== undefined && tag.x >= body.x + body.w - 1).toBe(true);
+    if (tag === undefined || body === undefined) throw new Error('缺次数标签或主体');
+    expect(tag.y + tag.h).toBeLessThanOrEqual(body.y + 1);
+    const nested = boxesOf('(?<x>a+)');
+    const prefix = nested.find((b) => b.tone === 'tagGroupPrefix');
+    const innerTag = nested.find((b) => b.tone === 'tagQuantifier');
+    if (prefix === undefined || innerTag === undefined) throw new Error('缺组标签或内层回环标签');
+    expect(prefix.y + prefix.h).toBeLessThanOrEqual(innerTag.y);
   });
 
   it('量词与组前缀各自产出标签盒', () => {

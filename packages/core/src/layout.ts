@@ -97,6 +97,15 @@ interface Placed {
   edges: DiagramEdge[];
   width: number;
   height: number;
+  /** 主体**上方**已被标签/回环占用的高度，用于让嵌套的标注互相错开而不打架。 */
+  above: number;
+  /** 主体**下方**已占用的高度（`min === 0` 的旁路弧走下面）。 */
+  below: number;
+}
+
+/** 只含主体盒、没有任何上方/下方标注的占位结果。 */
+function bare(boxes: DiagramBox[], edges: DiagramEdge[], width: number, height: number): Placed {
+  return { boxes, edges, width, height, above: 0, below: 0 };
 }
 
 function leafWidth(label: string, m: DiagramMetrics): number {
@@ -196,19 +205,42 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const inner = place(node.children[0] as AstNode, `${idPath}.0`, depth, ctx);
       const q = node.quantifier;
       const label = q === undefined ? '' : quantifierLabel(ctx.locale, q);
-      const tagW = leafWidth(label, ctx.m);
-      const tagH = ctx.m.lineHeight;
-      const gap = 4;
+      const greedy = q?.greedy ?? true;
+      const canSkip = (q?.min ?? 1) === 0;
+      const m = ctx.m;
+      const arcH = m.lineHeight + 4;
+      const base = inner.above + 4; // 回环水平段的上沿（从 inner.above 起叠，避免与组标签同层）
+      const topY = -(base + arcH);
+      const left = 0;
+      const right = inner.width;
       const boxes: DiagramBox[] = [...inner.boxes];
+      const edges: DiagramEdge[] = [...inner.edges];
+      const ah = 5;
+
+      // 回环：右端上行 → 水平跨过主体 → 左端下行回到主体入口
+      edges.push({ id: `${idPath}.r1`, from: { x: right, y: 0 }, to: { x: right, y: topY } });
+      edges.push({ id: `${idPath}.r2`, from: { x: right, y: topY }, to: { x: left, y: topY } });
+      edges.push({ id: `${idPath}.r3`, from: { x: left, y: topY }, to: { x: left, y: 0 } });
+      // 箭头朝向即贪婪性：greedy 的箭头落在左端、指向主体（优先再绕一次）；
+      // lazy 的箭头在右端、指离主体（优先结束重复）。
+      if (greedy) {
+        edges.push({ id: `${idPath}.ah1`, from: { x: left - ah, y: -ah * 2 }, to: { x: left, y: -ah } });
+        edges.push({ id: `${idPath}.ah2`, from: { x: left + ah, y: -ah * 2 }, to: { x: left, y: -ah } });
+      } else {
+        edges.push({ id: `${idPath}.ah1`, from: { x: right - ah, y: topY + ah * 2 }, to: { x: right, y: topY + ah } });
+        edges.push({ id: `${idPath}.ah2`, from: { x: right + ah, y: topY + ah * 2 }, to: { x: right, y: topY + ah } });
+      }
+
+      let labelW = 0;
       if (label !== '') {
-        // 次数标识跟在内容后面，并与主体垂直对齐 —— 不占垂直分配，避免抬高基线。
+        labelW = label.length * m.charWidth;
         boxes.push(
           box(
             `${idPath}.q`,
-            inner.width + gap,
-            (inner.height - tagH) / 2,
-            tagW,
-            tagH,
+            (right - labelW) / 2,
+            topY - m.lineHeight,
+            labelW,
+            m.lineHeight,
             label,
             'tagQuantifier',
             depth,
@@ -217,11 +249,25 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
           )
         );
       }
+
+      let below = inner.below;
+      if (canSkip) {
+        // min === 0 的「可以整段跳过」走下方旁路，不与回环抢上方空间。
+        const skipDepth = inner.below + 4 + arcH;
+        const sy = inner.height + skipDepth;
+        edges.push({ id: `${idPath}.s1`, from: { x: left, y: inner.height }, to: { x: left, y: sy } });
+        edges.push({ id: `${idPath}.s2`, from: { x: left, y: sy }, to: { x: right, y: sy } });
+        edges.push({ id: `${idPath}.s3`, from: { x: right, y: sy }, to: { x: right, y: inner.height } });
+        below = skipDepth;
+      }
+
       return {
         boxes,
-        edges: inner.edges,
-        width: inner.width + (label === '' ? 0 : gap + tagW),
-        height: inner.height
+        edges,
+        width: Math.max(inner.width, labelW),
+        height: inner.height,
+        above: base + arcH + (label === '' ? 0 : m.lineHeight),
+        below
       };
     }
     case 'group': {
@@ -232,10 +278,10 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const tagH = ctx.m.lineHeight;
       const tag = groupTag(node);
       const tagW = leafWidth(tag, ctx.m);
-      // 容器向上扩出「标签行 + 上留白」，主体仍留在 0..inner.height，
-      // 于是它在去掉标签行后的内容区里天然垂直居中，且基线不受标签影响。
-      const containerY = -(tagH + padY);
-      const containerH = tagH + padY + inner.height + padY;
+      // 标签行叠在 inner.above 之上：组内的回环弧占了一层，`#N` 必须再高一层才不会压上去。
+      const tagBase = inner.above + 4;
+      const containerY = -(tagBase + tagH + padY);
+      const containerH = tagBase + tagH + padY + inner.height + padY + inner.below;
       return {
         boxes: [
           box(
@@ -264,23 +310,25 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
         ],
         edges: [...shiftEdges(inner.edges, padX, 0)],
         width: inner.width + padX * 2,
-        height: inner.height
+        height: inner.height,
+        above: tagBase + tagH + padY,
+        below: inner.below + padY
       };
     }
     default: {
       const { label, tone, escaped } = leafLabel(node, ctx);
       const w = leafWidth(label, ctx.m);
-      return {
-        boxes: [
+      return bare(
+        [
           box(idPath, 0, 0, w, ctx.m.leafHeight, label, tone, depth, {
             start: node.start,
             end: node.end
           }, escaped)
         ],
-        edges: [],
-        width: w,
-        height: ctx.m.leafHeight
-      };
+        [],
+        w,
+        ctx.m.leafHeight
+      );
     }
   }
 }
@@ -334,17 +382,19 @@ function placeSequence(node: AstNode, idPath: string, depth: number, ctx: Ctx): 
     }
     x += p.width + ctx.m.gapX;
   });
-  return { boxes, edges, width: Math.max(0, x - ctx.m.gapX), height };
+  const above = placed.reduce((max, p) => Math.max(max, p.above), 0);
+  const below = placed.reduce((max, p) => Math.max(max, p.below), 0);
+  return { boxes, edges, width: Math.max(0, x - ctx.m.gapX), height, above, below };
 }
 
 function placeRun(text: string, start: number, end: number, id: string, depth: number, ctx: Ctx): Placed {
   const w = leafWidth(text, ctx.m);
-  return {
-    boxes: [box(id, 0, 0, w, ctx.m.leafHeight, text, 'text', depth, { start, end }, text)],
-    edges: [],
-    width: w,
-    height: ctx.m.leafHeight
-  };
+  return bare(
+    [box(id, 0, 0, w, ctx.m.leafHeight, text, 'text', depth, { start, end }, text)],
+    [],
+    w,
+    ctx.m.leafHeight
+  );
 }
 
 function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
@@ -353,24 +403,43 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
   const edges: DiagramEdge[] = [];
   const branches = node.children.map((child, i) => place(child, `${idPath}.${i}`, depth, ctx));
   const width = branches.reduce((max, b) => Math.max(max, b.width), 0);
-  const totalHeight = branches.reduce((sum, b) => sum + b.height, 0) + m.gapY * Math.max(0, branches.length - 1);
-  const spineY = totalHeight / 2;
+  // 每个分支按「上方标注 + 主体 + 下方旁路」占一个槽位，主体落在槽内 ——
+  // 若只按主体高度堆叠，上一分支的下旁路会被下一分支的上方回环压住。
+  const slotOf = (b: Placed): number => b.above + b.height + b.below;
+  const totalSlots =
+    branches.reduce((sum, b) => sum + slotOf(b), 0) + m.gapY * Math.max(0, branches.length - 1);
 
-  let y = 0;
+  const mids: number[] = [];
+  let offset = 0;
+  branches.forEach((branch) => {
+    const bodyTop = offset + branch.above;    boxes.push(...shift(branch.boxes, m.gapX, bodyTop));
+    edges.push(...shiftEdges(branch.edges, m.gapX, bodyTop));
+    mids.push(bodyTop + branch.height / 2);
+    offset = bodyTop + branch.height + branch.below + m.gapY;
+  });
+
+  const first = mids[0] ?? m.leafHeight / 2;
+  const last = mids[mids.length - 1] ?? first;
+  const spineY = (first + last) / 2; // 分歧/汇聚中线取首末主体中线的中点
+
   branches.forEach((branch, i) => {
-    boxes.push(...shift(branch.boxes, m.gapX, y));
-    edges.push(...shiftEdges(branch.edges, m.gapX, y));
-    const midY = y + branch.height / 2;
+    const midY = mids[i] ?? spineY;
     edges.push({ id: `${idPath}.in${i}`, from: { x: 0, y: spineY }, to: { x: m.gapX, y: midY } });
     edges.push({
       id: `${idPath}.out${i}`,
       from: { x: m.gapX + branch.width, y: midY },
       to: { x: width + m.gapX * 2, y: spineY }
     });
-    y += branch.height + m.gapY;
   });
 
-  return { boxes, edges, width: width + m.gapX * 2, height: Math.max(m.leafHeight, totalHeight) };
+  return {
+    boxes,
+    edges,
+    width: width + m.gapX * 2,
+    height: Math.max(m.leafHeight, totalSlots),
+    above: 0, // 上方标注已内化进 slot，外层不必再扩
+    below: 0
+  };
 }
 
 function shift(boxes: readonly DiagramBox[], dx: number, dy: number): DiagramBox[] {

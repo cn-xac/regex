@@ -90,4 +90,4 @@ pnpm --filter playground typecheck
 
 ## License
 
-MIT © [xyj2156](https://github.com/xyj2156)
+MIT © [阿杰很厉害](https://github.com/xyj2156)

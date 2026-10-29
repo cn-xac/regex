@@ -48,6 +48,21 @@ export interface Quantifier {
   source: string;
 }
 
+/**
+ * 字符类内部的四类成员。借鉴 js-regex-visualizer 的 charset 状态划分
+ * （它把 classEscape / hexEscape / unicodeEscape / rangeEnd / nullChar 分开建模），
+ * 而不是把 `[...]` 当一整段原文 —— 否则图上读不出「a 到 z 的区间」和「数字类」。
+ */
+export type ClassItemKind = 'predefined' | 'range' | 'hex' | 'unicode' | 'escape' | 'literal';
+
+export interface ClassItem {
+  readonly kind: ClassItemKind;
+  /** 原始片段，如 `a-z`、`\d`、`\x41`。所有 item 的 text 依次拼接必须等于 classBody。 */
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+}
+
 export interface AstNode {
   readonly kind: AstNodeKind;
   readonly start: number;
@@ -64,6 +79,8 @@ export interface AstNode {
   readonly negated?: boolean;
   /** 字符类内容原样保留（含 `a-z` 区间与转义），图上直接排版。 */
   readonly classBody?: string;
+  /** 字符类内部的结构化成员；`classBody` 是它的原文拼接，两者必须自洽。 */
+  readonly classItems?: readonly ClassItem[];
 }
 
 export type ParseResult =
@@ -193,29 +210,72 @@ function parseCharacterClass(state: Parser): AstNode {
   }
   // 类内**任何** `]` 都关闭类，没有"首个 ] 当字面量"的例外（实测 V8：`[]]` 是空类
   // 加一个游离 `]`，整体永不匹配；`[^]` 是"任意字符"，`[^]]` 则要求两字符）。
-  let body = '';
+  const items: ClassItem[] = [];
   let closed = false;
   while (state.pos < state.src.length) {
-    const ch = state.src.charAt(state.pos);
-    if (ch === BS) {
-      const next = state.src.charAt(state.pos + 1);
-      if (next === '') throw new ParseAbort('Pattern ends with a trailing backslash', state.pos);
-      body += ch + next;
-      state.pos += 2;
-      continue;
-    }
+    const at = state.pos;
+    const ch = state.src.charAt(at);
+
     if (ch === ']') {
-      state.pos += 1;
+      state.pos = at + 1;
       closed = true;
       break;
     }
-    body += ch;
-    state.pos += 1;
+    if (ch === BS) {
+      const next = state.src.charAt(at + 1);
+      if (next === '') throw new ParseAbort('Pattern ends with a trailing backslash', at);
+      if (next === 'd' || next === 'D' || next === 'w' || next === 'W' || next === 's' || next === 'S') {
+        state.pos = at + 2;
+        items.push({ kind: 'predefined', text: BS + next, start: at, end: state.pos });
+        continue;
+      }
+      if (next === 'x') {
+        const hex = state.src.slice(at + 2, at + 4);
+        state.pos = at + 2 + hex.length;
+        items.push({ kind: 'hex', text: BS + 'x' + hex, start: at, end: state.pos });
+        continue;
+      }
+      if (next === 'u') {
+        if (state.src.charAt(at + 2) === '{') {
+          const close = state.src.indexOf('}', at + 3);
+          if (close === -1) throw new ParseAbort('Unterminated \\u{...} escape', at);
+          const text = BS + 'u{' + state.src.slice(at + 3, close) + '}';
+          state.pos = at + text.length;
+          items.push({ kind: 'unicode', text, start: at, end: state.pos });
+          continue;
+        }
+        const hex = state.src.slice(at + 2, at + 6);
+        state.pos = at + 2 + hex.length;
+        items.push({ kind: 'unicode', text: BS + 'u' + hex, start: at, end: state.pos });
+        continue;
+      }
+      // \n \t \0 \b \\ \] 等：类内按单个转义成员处理
+      state.pos = at + 2;
+      items.push({ kind: 'escape', text: BS + next, start: at, end: state.pos });
+      continue;
+    }
+
+    // 区间 `a-z`；但 `a-]` 里的 `-` 是字面量（下一个字符是 ] 就不算区间）
+    if (state.src.charAt(at + 1) === '-' && state.src.charAt(at + 2) !== '' && state.src.charAt(at + 2) !== ']') {
+      const text = ch + '-' + state.src.charAt(at + 2);
+      state.pos = at + 3;
+      items.push({ kind: 'range', text, start: at, end: state.pos });
+      continue;
+    }
+    state.pos = at + 1;
+    items.push({ kind: 'literal', text: ch, start: at, end: state.pos });
   }
   if (!closed) throw new ParseAbort('Unterminated character class', start);
-  // 取反标记与 body 分字段存，视图不必再解析一次
-  void negated;
-  return node({ kind: 'characterClass', start, end: state.pos, classBody: body, negated });
+  // classBody 一律由 items 拼回 —— 结构化与原文两者不可能互相矛盾（测试钉这条不变量）
+  const body = items.map((i) => i.text).join('');
+  return node({
+    kind: 'characterClass',
+    start,
+    end: state.pos,
+    classBody: body,
+    classItems: Object.freeze(items.map((i) => Object.freeze(i))),
+    negated
+  });
 }
 
 /** 分组与零宽断言。 */

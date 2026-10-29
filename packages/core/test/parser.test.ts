@@ -300,6 +300,31 @@ describe('结构细节', () => {
     expect(root.children).toHaveLength(3);
   });
 
+  /** 借鉴 js-regex-visualizer 的 charset 状态划分：类内成员要结构化，不能只是一段原文。 */
+  it('字符类内部解析成成员，且拼回 classBody 与原文自洽', () => {
+    const cases: ReadonlyArray<[string, string[]]> = [
+      ['[a-z0-9]', ['a-z', '0-9']],
+      ['[\\d\\s]', ['\\d', '\\s']],
+      ['[abc]', ['a', 'b', 'c']],
+      ['[a-]', ['a', '-']],
+      ['[a\\]]', ['a', '\\]']],
+      ['[\\x41]', ['\\x41']],
+      ['[\\u0041]', ['\\u0041']],
+      ['[\\u{1F600}]', ['\\u{1F600}']],
+      ['[a-z\\-]', ['a-z', '\\-']]
+    ];
+    for (const [pattern, expected] of cases) {
+      const node = parsed(pattern).children[0] as AstNode;
+      const items = node.classItems ?? [];
+      expect(items.map((i) => i.text), pattern).toEqual(expected);
+      // classBody 必须由 items 拼回，且与源串去掉两侧括号完全一致
+      expect(node.classBody, pattern).toBe(pattern.slice(1, pattern.length - 1));
+      for (let i = 1; i < items.length; i++) {
+        expect(items[i]?.start, pattern).toBe(items[i - 1]?.end);
+      }
+    }
+  });
+
   it('单个分支不产生多余的 disjunction 包装', () => {
     expect(parsed('abc').kind).toBe('alternative');
   });

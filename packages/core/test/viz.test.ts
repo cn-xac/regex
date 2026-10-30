@@ -242,6 +242,45 @@ describe('layout 不变量', () => {
   });
 
   /**
+   * 使用者反馈（截图）：`(?<year>\d?)` 里 `\d?` 的**下方旁路**钻出 #1 year 虚线框下沿。
+   * 探针实测溢出 4px，根因是序列聚合 `below = height - Y0` 丢掉 quantified 的 skipDepth。
+   * 钉死不变量：凡在水平方向被某容器框包住的 bypass path，其最低点 y 不得超过该框下沿。
+   */
+  it('分组容器把 min=0 的下方旁路整个包住（不溢出框下沿）', () => {
+    const CONTAINERS = ['group', 'nonCapturing', 'assertion'];
+    for (const p of ['(?<year>\\d?)', '(a?)', '(\\d?)-b', '(?<m>\\d?)-(\\d?)']) {
+      const d = diagramFor(p);
+      const containers = d.boxes.filter((b) => CONTAINERS.includes(b.tone));
+      const bypasses = bypassesOf(d);
+      expect(bypasses.length, `${p} 应有 min=0 旁路`).toBeGreaterThan(0);
+      for (const bp of bypasses) {
+        const ys = bp.points.map((pt) => pt[1]);
+        const xs = bp.points.map((pt) => pt[0]);
+        const minBpX = Math.min(...xs);
+        const maxBpX = Math.max(...xs);
+        // 找水平方向兜住该旁路的容器框（顶层无包裹框的旁路由画布高度兜住，跳过）
+        const host = containers.find((c) => c.x <= minBpX + 1 && c.x + c.w >= maxBpX - 1);
+        if (host === undefined) continue;
+        expect(Math.max(...ys), `${p}：旁路溢出容器框下沿`).toBeLessThanOrEqual(host.y + host.h);
+      }
+    }
+  });
+
+  /**
+   * 该修复必须**非回归**：只有下探旁路的组撑高，仅上方回环 / 纯字面量的组下留白不变，
+   * 否则又会把观感推回反复调过的对称/收紧档（探针实测 `(?<a>\d+)` 容器 h=106 不变）。
+   */
+  it('仅上方回环的组不被旁路修复撑高（下留白守恒）', () => {
+    const loopOnly = diagramFor('(?<a>\\d+)');
+    const loopBox = loopOnly.boxes.find((b) => b.tone === 'group');
+    const bypassBox = diagramFor('(?<a>\\d?)').boxes.find((b) => b.tone === 'group');
+    if (loopBox === undefined || bypassBox === undefined) throw new Error('缺容器框');
+    // 二者上沿与内容高相同；bypass 版仅因旁路而下延，故更高。差值应恰为旁路相对回环的多出留白。
+    expect(bypassBox.y).toBe(loopBox.y);
+    expect(bypassBox.h).toBeGreaterThan(loopBox.h);
+  });
+
+  /**
    * 使用者反馈：前缀标签要「居中 + 移到框上方」，字号独立于次数标签。
    * 钉死五种前缀在中英双语下：① 水平居中于框 ② 整块在框上沿之上 ③ 字号=prefixFontSize。
    */

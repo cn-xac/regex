@@ -585,7 +585,16 @@ function placeSequence(node: AstNode, idPath: string, depth: number, ctx: Ctx): 
   // 高度当上方净空），使外层分组按不足的 above 摆放组前缀标签，正好压在内层量化标签上
   // （`(a+)`、`(?<x>a+)` 实测叠压）。纯字面量序列各子 above=0、railY=Y0 → 仍为 0，主体基线不变。
   const above = placed.reduce((mx, p) => Math.max(mx, p.above + p.railY - Y0), 0);
-  return { boxes, edges, paths, width, height, above, below: height - Y0, railY: Y0 };
+  // 下方净空：取「既有约定 height − Y0（盒底−中心线，保序、不缩纯字面量组的下留白）」与
+  // 「各子旁路探到盒底之下的真实深度」二者之大。后者 = max(offsetY + p.height + p.below − height)。
+  // 缺了它，min=0 量化旁路（quantified 的 skipDepth）会被外层分组按不足的 below 撑框、钻出虚线框
+  // 下沿 —— 实测 `(?<year>\d?)` 旁路最低点比容器下沿低 4px。改此仅在有下探旁路时把框撑够，
+  // 纯字面量 / 仅上方回环的组（`(?<a>\d+)`）below 不变，观感不回退到反复调的对称/收紧档。
+  const deepBelow = placed.reduce(
+    (mx, p) => Math.max(mx, Y0 - p.railY + p.height + p.below - height),
+    0
+  );
+  return { boxes, edges, paths, width, height, above, below: Math.max(height - Y0, deepBelow), railY: Y0 };
 }
 
 function placeRun(text: string, start: number, end: number, id: string, depth: number, ctx: Ctx): Placed {

@@ -122,7 +122,7 @@ export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
   gapY: 14,
   minWidth: 30,
   fontSize: 16,
-  tagFontSize: 14
+  tagFontSize: 12
 });
 
 /** 回环 / 旁路折线的内拐点倒圆半径（px）。**实测自 Regulex 可视化源码**：其圆角偏移量

@@ -522,7 +522,13 @@ function placeSequence(node: AstNode, idPath: string, depth: number, ctx: Ctx): 
   });
   const width = Math.max(0, x - ctx.m.gapX);
   const height = placed.reduce((max, p) => Math.max(max, Y0 - p.railY + p.height), ctx.m.leafHeight);
-  return { boxes, edges, paths, width, height, above: Y0, below: height - Y0, railY: Y0 };
+  // `above` 必须是「内容盒上边缘(y=0)之上的净空」，不是「中心线 Y0 之上的空间」。
+  // 子元素把中心线抬到 Y0（offsetY = Y0 − p.railY），其上方净空带上移到 offsetY − p.above，
+  // 取最负者即为序列上方真实净空 = max(p.above + p.railY − Y0)。早先这里返回 Y0（把中心线
+  // 高度当上方净空），使外层分组按不足的 above 摆放组前缀标签，正好压在内层量化标签上
+  // （`(a+)`、`(?<x>a+)` 实测叠压）。纯字面量序列各子 above=0、railY=Y0 → 仍为 0，主体基线不变。
+  const above = placed.reduce((mx, p) => Math.max(mx, p.above + p.railY - Y0), 0);
+  return { boxes, edges, paths, width, height, above, below: height - Y0, railY: Y0 };
 }
 
 function placeRun(text: string, start: number, end: number, id: string, depth: number, ctx: Ctx): Placed {

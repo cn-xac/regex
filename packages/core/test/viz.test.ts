@@ -416,6 +416,27 @@ describe('layout 不变量', () => {
     const narrow = layoutRailroad(astFor('abc'));
     expect(wide.width).toBeGreaterThan(narrow.width);
   });
+
+  /**
+   * 回归不变量（使用者反馈：分组和次数标签有重叠）：任意 pattern 下，组前缀标签盒
+   * 与次数量词标签盒都不得矩形交叠。根因是 `placeSequence` 曾把 `above` 报成中心线
+   * 高度而非内容盒上方净空，使外层分组按不足的 above 摆放组标签、压在内层量化标签上。
+   */
+  it('组前缀标签与次数标签永不交叠', () => {
+    const hit = (a: DiagramBox, b: DiagramBox): boolean =>
+      a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const nested = ['(a+)', '(a+)+', '(?<n>a+)+', '(?<t>a*)+', 'a+', 'a+b', '(a|b)+', '(?<x>a)?', 'ab+c'];
+    for (const pattern of nested) {
+      const boxes = diagramFor(pattern).boxes;
+      const prefixes = boxes.filter((b) => b.tone === 'tagGroupPrefix');
+      const quants = boxes.filter((b) => b.tone === 'tagQuantifier');
+      for (const p of prefixes) {
+        for (const q of quants) {
+          expect(hit(p, q), `pattern=${pattern} "${p.label}" 压 "${q.label}"`).toBe(false);
+        }
+      }
+    }
+  });
 });
 
 describe('SVG painter', () => {

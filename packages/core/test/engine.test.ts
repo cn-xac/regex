@@ -170,8 +170,12 @@ describe('matchAll 与原生引擎差分', () => {
   });
 
   it('重复调用同一输入结果一致（不污染外部 RegExp 状态）', () => {
-    const a = matchAll('aaa', 'a+', 'g');
-    const b = matchAll('aaa', 'a+', 'g');
+    // 注入固定时钟：本用例断言的是「匹配结果可重复、不被 lastIndex 污染」，
+    // 而 stats.elapsedMs 走真实挂钟，两次调用可能跨毫秒抖动 —— 用恒定 now 消歧，
+    // 让 elapsedMs 稳定，只比它真正该保证的字段（matches / nextIndex / iterations）。
+    const now = () => 0;
+    const a = matchAll('aaa', 'a+', 'g', { now });
+    const b = matchAll('aaa', 'a+', 'g', { now });
     expect(b).toEqual(a);
   });
 });

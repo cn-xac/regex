@@ -93,6 +93,7 @@ export const LIGHT: ThemePalette = Object.freeze({
     assertion: box('#2b8a3e', '#00000000', '#175c28', 6, CONTAINER_DASH),
     backreference: box('#00000000', '#86a7d6', '#10233f', 8),
     group: box('#1c63b5', '#00000000', '#123a63', 6, CONTAINER_DASH),
+    nonCapturing: box('#64748b', '#00000000', '#334155', 6, CONTAINER_DASH),
     choice: box('#94a3b8', '#00000000', '#0f172a', 6, CONTAINER_DASH),
     tagQuantifier: box('#00000000', '#00000000', '#b8860b', 0),
     tagGroupPrefix: box('#00000000', '#00000000', '#1c63b5', 0)
@@ -111,6 +112,7 @@ export const DARK: ThemePalette = Object.freeze({
     assertion: box('#69db7c', '#00000000', '#c6f5d0', 6, CONTAINER_DASH),
     backreference: box('#00000000', '#4d3a1a', '#ffd8b0', 8),
     group: box('#74c0fc', '#00000000', '#bfe0ff', 6, CONTAINER_DASH),
+    nonCapturing: box('#8b98a9', '#00000000', '#c4ccd6', 6, CONTAINER_DASH),
     choice: box('#64748b', '#00000000', '#e6eaf0', 6, CONTAINER_DASH),
     tagQuantifier: box('#00000000', '#00000000', '#ffd43b', 0),
     tagGroupPrefix: box('#00000000', '#00000000', '#74c0fc', 0)

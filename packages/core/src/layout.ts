@@ -16,8 +16,16 @@
  */
 import { quantifierLabel, tokenLabel, boundaryLabel, translate } from './i18n';
 import type { Locale } from './i18n';
-import type { AstNode } from './parser';
+import type { AstNode, GroupKind } from './parser';
 import type { SourceRange } from './types';
+
+/** 四种零宽断言的 GroupKind（`negative*` 里的 `Look` 大写，不能用 includes/startWith 判）。 */
+const ASSERTION_KINDS: ReadonlySet<GroupKind> = new Set<GroupKind>([
+  'lookahead',
+  'negativeLookahead',
+  'lookbehind',
+  'negativeLookbehind'
+]);
 
 export type BoxTone =
   | 'text'
@@ -28,6 +36,7 @@ export type BoxTone =
   | 'backreference'
   | 'dot'
   | 'group'
+  | 'nonCapturing'
   | 'choice'
   | 'tagQuantifier'
   | 'tagGroupPrefix';
@@ -424,7 +433,16 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
     }
     case 'group': {
       const inner = place(node.children[0] as AstNode, `${idPath}.0`, depth + 1, ctx);
-      const isAssertion = (node.group ?? 'capturing').startsWith('look');
+      const kind = node.group ?? 'capturing';
+      // 容器分三态：捕获/命名 = 'group'（蓝），非捕获 = 'nonCapturing'（中性灰，一眼看出不捕获），
+      // 零宽断言 = 'assertion'（绿）。判据用 includes('look')：四种断言 kind
+      // （lookahead / negativeLookahead / lookbehind / negativeLookbehind）都含 'look'，
+      // 而 negative* 以 n 开头，startsWith('look') 会漏掉它们（既有 bug，本次一并修）。
+      const containerTone: BoxTone = ASSERTION_KINDS.has(kind)
+        ? 'assertion'
+        : kind === 'nonCapturing'
+          ? 'nonCapturing'
+          : 'group';
       const padX = ctx.m.padX + 6;
       const padY = ctx.m.padY;
       const tagH = ctx.m.lineHeight;
@@ -445,7 +463,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
             groupW,
             containerH,
             '',
-            isAssertion ? 'assertion' : 'group',
+            containerTone,
             depth,
             { start: node.start, end: node.end }
           ),

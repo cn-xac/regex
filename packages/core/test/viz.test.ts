@@ -34,6 +34,7 @@ const TONES: readonly string[] = [
   'backreference',
   'dot',
   'group',
+  'nonCapturing',
   'choice',
   'tagQuantifier',
   'tagGroupPrefix'
@@ -225,6 +226,19 @@ describe('layout 不变量', () => {
     expect(g.map((b) => b.escaped)).toEqual(['(?:', '(?=', '(?<=', '(?!']);
     // 英文走同一套短语（本地化，非硬编码中文）
     expect(tags('(?=x)(?<!y)', 'en').map((b) => b.label)).toEqual(['followed by', 'not preceded by']);
+  });
+
+  /** 使用者反馈：非捕获组「不是分组」→ 容器 tone 必须与捕获组、断言三者可辨。 */
+  it('容器分三态：捕获=group、非捕获=nonCapturing、断言=assertion', () => {
+    const tone = (p: string) =>
+      boxesOf(p).find((b) => b.tone === 'group' || b.tone === 'nonCapturing' || b.tone === 'assertion')?.tone;
+    expect(tone('(a)')).toBe('group');
+    expect(tone('(?<n>a)')).toBe('group');
+    expect(tone('(?:a)')).toBe('nonCapturing');
+    expect(tone('(?=a)')).toBe('assertion');
+    expect(tone('(?!a)')).toBe('assertion');
+    expect(tone('(?<=a)')).toBe('assertion');
+    expect(tone('(?<!a)')).toBe('assertion');
   });
 
   /** 使用者反馈 3 的另一半：次数与贪婪性由回环表达，不摆一行文字在屁股后面。 */

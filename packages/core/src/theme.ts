@@ -85,7 +85,7 @@ function lines(
 export const LIGHT: ThemePalette = Object.freeze({
   name: 'light',
   box: Object.freeze({
-    text: box('#00000000', '#eef2f7', '#0f172a', 6),
+    text: box('#00000000', '#d5dde8', '#0f172a', 6),
     dot: box('#00000000', '#c2e0c2', '#143414', 10),
     escape: box('#00000000', '#a3d0a3', '#123a1e', 5),
     characterClass: box('#00000000', '#c8b6f0', '#2d1660', 5),

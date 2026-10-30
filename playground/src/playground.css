@@ -96,6 +96,13 @@ body {
   border-radius: 10px;
 }
 
+/* 三个 tab 共用同一层 .pg-panel 卡边：vue/react 里的库皮肤自带不透明根背景，
+   直接嵌进卡片会露出「卡中卡」接缝（尤其深色主题）。仅在宿主嵌入上下文把库根背景
+   抹平，让边框/圆角只由 .pg-panel 提供，观感与 vanilla 对齐。库单独使用时不受此影响。 */
+.pg-panel .x-ac-regex-root {
+  background: transparent;
+}
+
 .pg-hint {
   margin: 0 0 12px;
   color: var(--pg-muted);

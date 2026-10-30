@@ -34,15 +34,16 @@
   -webkit-text-size-adjust: 100%;
 }
 
+/* 无显式主题时跟随系统偏好；一旦宿主在根节点写了 data-theme，下面的属性块接管，媒体查询让位。 */
 @media (prefers-color-scheme: dark) {
-  .x-ac-regex-root {
+  .x-ac-regex-root:not([data-theme]) {
     --x-ac-regex-fg: #e6eaf0;
     --x-ac-regex-bg: #14181f;
     --x-ac-regex-muted: #9aa5b4;
     --x-ac-regex-line: #2b3240;
     --x-ac-regex-match-bg: #4a3f10;
     --x-ac-regex-match-line: #b58900;
-    --x-ac-regex-active-bg: #6b560f;
+    --x-ac-regex-active-bg: #6b561f;
     --x-ac-regex-zero-width: #f06595;
     --x-ac-regex-error: #ff6b6b;
     --x-ac-regex-warning: #ffd43b;
@@ -51,6 +52,25 @@
     --x-ac-regex-group-2: #b197fc;
     --x-ac-regex-group-3: #ffa94d;
   }
+}
+
+/* 显式主题优先：宿主把选定的 theme 写到 .x-ac-regex-root[data-theme]，整块皮肤（含
+   输入框 / 图容器 / 高亮）即跟随，不再只依赖 OS 偏好 —— 契合「主题可被宿主控制」。 */
+.x-ac-regex-root[data-theme='dark'] {
+  --x-ac-regex-fg: #e6eaf0;
+  --x-ac-regex-bg: #14181f;
+  --x-ac-regex-muted: #9aa5b4;
+  --x-ac-regex-line: #2b3240;
+  --x-ac-regex-match-bg: #4a3f10;
+  --x-ac-regex-match-line: #b58900;
+  --x-ac-regex-active-bg: #6b561f;
+  --x-ac-regex-zero-width: #f06595;
+  --x-ac-regex-error: #ff6b6b;
+  --x-ac-regex-warning: #ffd43b;
+  --x-ac-regex-group-0: #74c0fc;
+  --x-ac-regex-group-1: #69db7c;
+  --x-ac-regex-group-2: #b197fc;
+  --x-ac-regex-group-3: #ffa94d;
 }
 
 /* 代码区统一等宽；正则与文本都要按字符对齐，字体不是装饰而是正确性前提 */

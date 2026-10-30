@@ -153,7 +153,7 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
   );
 
   return (
-    <div className="x-ac-regex-root" ref={ref}>
+    <div className="x-ac-regex-root" data-theme={svgTheme} ref={ref}>
       <h2 className="x-ac-regex-title">{t('app.title')}</h2>
       <p className="x-ac-regex-tagline">{t('app.tagline')}</p>
 

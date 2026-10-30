@@ -126,7 +126,7 @@ function toggleFlag(flag: RegexFlag): void {
 </script>
 
 <template>
-  <div class="x-ac-regex-root">
+  <div class="x-ac-regex-root" :data-theme="props.svgTheme">
     <h2 class="x-ac-regex-title">{{ t('app.title') }}</h2>
     <p class="x-ac-regex-tagline">{{ t('app.tagline') }}</p>
 

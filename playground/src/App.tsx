@@ -168,7 +168,11 @@ function VuePanel({
     };
   }, [candidateKey, theme]);
 
-  return <div ref={hostRef} />;
+  return (
+    <section className="pg-panel">
+      <div ref={hostRef} />
+    </section>
+  );
 }
 
 export function App(): JSX.Element {

@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { parsePattern, stringifyAst } from '../src/parser';
 import type { AstNode } from '../src/parser';
 import { DEFAULT_METRICS, layoutRailroad } from '../src/layout';
-import type { BoxTone, Diagram, DiagramBox } from '../src/layout';
+import type { BoxTone, Diagram, DiagramBox, DiagramPath } from '../src/layout';
 import type { Locale } from '../src/i18n';
-import { applyCanvasOps, escapeXml, renderCanvasOps, renderSvg } from '../src/painter';
+import { applyCanvasOps, arrowHead, escapeXml, renderCanvasOps, renderSvg, roundedPathD, trianglePathD } from '../src/painter';
 import type { CanvasOp, PaintContext } from '../src/painter';
 
 const PATTERNS: readonly string[] = [
@@ -55,6 +55,25 @@ function boxesOf(pattern: string, locale: Locale = 'zh-CN'): readonly DiagramBox
   return layoutRailroad(astFor(pattern), { locale }).boxes;
 }
 
+/** 回环箭头的尖点坐标（head 在末点、tail 在首点），供贪懒方向断言。 */
+function arrowTip(p: DiagramPath): readonly [number, number] {
+  if (p.arrow === 'head') {
+    const last = p.points[p.points.length - 1];
+    if (last === undefined) throw new Error('head 箭头需要至少一个点');
+    return last;
+  }
+  if (p.arrow === 'tail') {
+    const first = p.points[0];
+    if (first === undefined) throw new Error('tail 箭头需要至少一个点');
+    return first;
+  }
+  throw new Error('该路径无箭头');
+}
+
+const loopOf = (d: Diagram): DiagramPath | undefined => d.paths.find((p) => p.tone === 'loop');
+const bypassesOf = (d: Diagram): readonly DiagramPath[] => d.paths.filter((p) => p.tone === 'bypass');
+const choiceOf = (d: Diagram): readonly DiagramPath[] => d.paths.filter((p) => p.tone === 'choice');
+
 describe('layout 不变量', () => {
   it('尺寸恒为正，且所有盒子与连线都落在画布内', () => {
     for (const pattern of PATTERNS) {
@@ -74,6 +93,15 @@ describe('layout 不变量', () => {
         expect(edge.to.x).toBeLessThanOrEqual(d.width);
         expect(edge.from.y).toBeGreaterThanOrEqual(0);
         expect(edge.to.y).toBeLessThanOrEqual(d.height);
+      }
+      // 圆角是内缩拐角，折线顶点是外接上界 → 顶点在画布内即整条曲线也在画布内。
+      for (const path of d.paths) {
+        for (const [x, y] of path.points) {
+          expect(x).toBeGreaterThanOrEqual(0);
+          expect(x).toBeLessThanOrEqual(d.width);
+          expect(y).toBeGreaterThanOrEqual(0);
+          expect(y).toBeLessThanOrEqual(d.height);
+        }
       }
     }
   });
@@ -183,14 +211,18 @@ describe('layout 不变量', () => {
     // 次数标签落在主体上方的弧段附近，而不是右侧
     expect(tag.y + tag.h).toBeLessThanOrEqual(body.y + 1);
     expect(Math.abs(tag.x + tag.w / 2 - (body.x + body.w / 2))).toBeLessThan(body.w);
-    // 回环三段（右上行 / 水平跨 / 左下行）都在主体上方
-    const arc = plus.edges.filter((e) => /\.r[123]$/.test(e.id));
-    expect(arc).toHaveLength(3);
-    expect(arc.every((e) => Math.min(e.from.y, e.to.y) <= body.y + 1)).toBe(true);
-    // 箭头：贪婪落在左端指向主体，非贪婪落在右端指离主体，位置必须不同
-    const greedyArrowX = plus.edges.filter((e) => e.id.includes('.ah')).map((e) => e.to.x);
-    const lazyArrowX = diagramFor('a+?').edges.filter((e) => e.id.includes('.ah')).map((e) => e.to.x);
-    expect(Math.max(...greedyArrowX)).toBeLessThan(Math.min(...lazyArrowX));
+    // 回环折线包住主体：所有顶点都在主体上方，横向跨过整个主体
+    const loop = loopOf(plus);
+    if (loop === undefined) throw new Error('缺回环路径');
+    expect(loop.points.every((pt) => pt[1] <= body.y + 1)).toBe(true);
+    expect(Math.min(...loop.points.map((pt) => pt[0]))).toBeLessThanOrEqual(body.x + 1);
+    expect(Math.max(...loop.points.map((pt) => pt[0]))).toBeGreaterThanOrEqual(body.x + body.w - 1);
+    // 箭头朝向区分贪婪性：greedy 尖落在左端、lazy 尖落在右端
+    const lazy = loopOf(diagramFor('a+?'));
+    if (lazy === undefined) throw new Error('缺非贪婪回环路径');
+    expect(loop.arrow).toBe('head');
+    expect(lazy.arrow).toBe('tail');
+    expect(arrowTip(loop)[0]).toBeLessThan(arrowTip(lazy)[0]);
     // 文案仍按说话法
     expect(tag.escaped).toBe('+');
     const labelOf = (p: string) => diagramFor(p).boxes.find((b) => b.tone === 'tagQuantifier')?.label;
@@ -205,33 +237,34 @@ describe('layout 不变量', () => {
   it('min 为 0 的量词在主体下方画出旁路弧（表示可整段跳过）', () => {
     const skip = diagramFor('a*');
     const body = skip.boxes.find((b) => b.label === 'a');
-    const bypass = skip.edges.filter((e) => e.id.endsWith('.s2'));
+    const bypass = bypassesOf(skip);
     expect(bypass).toHaveLength(1);
     if (body === undefined) throw new Error('缺主体');
-    expect(bypass[0]?.from.y).toBeGreaterThan(body.y + body.h - 1);
+    const path = bypass[0] as DiagramPath;
+    // 旁路的水平段落在主体下方，且带箭头（表示「跳过」的流向）
+    expect(Math.max(...path.points.map((pt) => pt[1]))).toBeGreaterThan(body.y + body.h - 1);
+    expect(path.arrow).toBe('head');
     // `+` 的 min 是 1，不该有旁路
-    expect(diagramFor('a+').edges.filter((e) => e.id.endsWith('.s2'))).toHaveLength(0);
+    expect(bypassesOf(diagramFor('a+'))).toHaveLength(0);
   });
 
   /** 使用者反馈：量化一个分组时，回环与组框要互相包裹 —— 此时弧在外、框在内。 */
   it('量化分组时回环包住组框（竖直段从组框顶边起落，横向跨过整框）', () => {
     const d = diagramFor('(a|b)*?');
     const container = d.boxes.find((b) => b.tone === 'group');
-    const up = d.edges.find((e) => e.id.endsWith('.r1'));
-    const down = d.edges.find((e) => e.id.endsWith('.r3'));
+    const loop = loopOf(d);
     const prefix = d.boxes.find((b) => b.tone === 'tagGroupPrefix');
     const qLabel = d.boxes.find((b) => b.tone === 'tagQuantifier');
-    if (container === undefined || up === undefined || down === undefined) {
-      throw new Error('缺组框或回环边');
-    }
+    if (container === undefined || loop === undefined) throw new Error('缺组框或回环路径');
     if (prefix === undefined || qLabel === undefined) throw new Error('缺组标签或次数标签');
-    // 弧的起落点必须是**组框顶边**，而不是主体内容的 0 线
-    expect(up.from.y).toBe(container.y);
-    expect(down.to.y).toBe(container.y);
-    expect(up.to.y).toBeLessThan(container.y);
-    // 弧的右侧竖直段必须**在组框右缘之外**（向外让开，不与框边重合）
-    expect(up.from.x).toBeGreaterThan(container.x + container.w - 0.01);
-    expect(down.to.x).toBeLessThan(container.x + 0.01);
+    const pts = loop.points;
+    // 起落点（右上 / 左上）落在组框顶边，顶部两点更高
+    expect(pts[0]?.[1]).toBe(container.y);
+    expect(pts[3]?.[1]).toBe(container.y);
+    expect(pts[1]?.[1]).toBeLessThan(container.y);
+    // 竖直段在组框外缘之外（向外让开，不与框边重合）
+    expect(pts[0]?.[0]).toBeGreaterThan(container.x + container.w - 0.01);
+    expect(pts[3]?.[0]).toBeLessThan(container.x + 0.01);
     // 层位：次数标签（弧上）→ 组框顶 → 组标签（框内顶部），三者不重叠
     expect(qLabel.y + qLabel.h).toBeLessThanOrEqual(prefix.y);
     expect(prefix.y).toBeGreaterThanOrEqual(container.y);
@@ -242,15 +275,18 @@ describe('layout 不变量', () => {
     const d = diagramFor('(?<x>a+)');
     const container = d.boxes.find((b) => b.tone === 'group');
     if (container === undefined) throw new Error('缺组框');
-    const arc = d.edges.filter((e) => /\.r[123]$/.test(e.id));
-    expect(arc.length).toBeGreaterThan(0);
-    for (const e of arc) {
-      expect(e.from.x).toBeGreaterThanOrEqual(container.x - 0.5);
-      expect(e.to.x).toBeLessThanOrEqual(container.x + container.w + 0.5);
+    const arcs = d.paths.filter((p) => p.tone === 'loop');
+    expect(arcs.length).toBeGreaterThan(0);
+    for (const p of arcs) {
+      for (const [x] of p.points) {
+        expect(x).toBeGreaterThanOrEqual(container.x - 0.5);
+        expect(x).toBeLessThanOrEqual(container.x + container.w + 0.5);
+      }
     }
     // 框顶仍在弧之上（组标签占最外层）
     const prefix = d.boxes.find((b) => b.tone === 'tagGroupPrefix');
-    expect(prefix !== undefined && prefix.y <= Math.min(...arc.map((e) => Math.min(e.from.y, e.to.y)))).toBe(true);
+    const arcTop = Math.min(...arcs.flatMap((p) => p.points.map((pt) => pt[1])));
+    expect(prefix !== undefined && prefix.y <= arcTop).toBe(true);
   });
 
   it('中文标签按双宽 + 小一号字计宽，且不撑开序列占位', () => {
@@ -269,14 +305,15 @@ describe('layout 不变量', () => {
     if (group === undefined || c === undefined) throw new Error('缺组框或 c');
     expect(c.x - (group.x + group.w)).toBeLessThanOrEqual(DEFAULT_METRICS.gapX + 12);
     // 回环向外让开，不得压在组框边线上（否则像叠了第二个框）
-    const arc = d.edges.filter((e) => /\.r[13]$/.test(e.id));
-    expect(arc.length).toBeGreaterThan(0);
+    const arcs = d.paths.filter((p) => p.tone === 'loop');
+    expect(arcs.length).toBeGreaterThan(0);
     expect(
-      arc.every((e) => e.from.x <= group.x + 0.01 || e.from.x >= group.x + group.w - 0.01)
+      arcs.every((p) => p.points.every(([x]) => x <= group.x + 0.01 || x >= group.x + group.w - 0.01))
     ).toBe(true);
-    // 旁路弧仍要带箭头
-    expect(diagramFor('a*').edges.filter((e) => e.id.includes('.sh')).length).toBe(2);
-    expect(diagramFor('a+').edges.filter((e) => e.id.includes('.sh'))).toHaveLength(0);
+    // 旁路弧仍带箭头：a* 的旁路 arrow='head'，a+ 无旁路
+    const starBypass = bypassesOf(diagramFor('a*'))[0];
+    expect(starBypass?.arrow).toBe('head');
+    expect(bypassesOf(diagramFor('a+'))).toHaveLength(0);
   });
 
   /** 使用者反馈 4：内容与分组框之间留白，且内容在内容区垂直居中。 */
@@ -312,9 +349,9 @@ describe('layout 不变量', () => {
   it('交替的入口与出口汇聚在同一条水平中线上', () => {
     for (const pattern of ['a|bb|ccc', '(?:x|y)+']) {
       const d = diagramFor(pattern);
-      const spineYs = d.edges
-        .filter((e) => e.id.includes('.in') || e.id.includes('.out'))
-        .map((e) => (e.id.includes('.in') ? e.from.y : e.to.y));
+      const spineYs = choiceOf(d)
+        .map((p) => (p.id.includes('.in') ? p.points[0]?.[1] : p.points[p.points.length - 1]?.[1]))
+        .filter((y): y is number => y !== undefined);
       expect(spineYs.length).toBeGreaterThan(0);
       expect(new Set(spineYs).size, `pattern=${pattern}`).toBe(1);
     }
@@ -413,6 +450,8 @@ describe('Canvas painter', () => {
     'beginPath',
     'moveTo',
     'lineTo',
+    'path',
+    'triangle',
     'stroke'
   ];
 
@@ -450,12 +489,14 @@ describe('Canvas painter', () => {
       beginPath: () => calls.push('beginPath'),
       moveTo: () => calls.push('moveTo'),
       lineTo: () => calls.push('lineTo'),
+      path: () => calls.push('path'),
+      triangle: () => calls.push('triangle'),
       stroke: () => calls.push('stroke')
     };
     const ops = renderCanvasOps(d);
     applyCanvasOps(ops, ctx);
     // setStroke / setFill / setLineWidth / setFont 只做属性赋值，不产生方法调用
-    const DRAW: readonly string[] = ['strokeRect', 'fillText', 'beginPath', 'moveTo', 'lineTo', 'stroke'];
+    const DRAW: readonly string[] = ['strokeRect', 'fillText', 'beginPath', 'moveTo', 'lineTo', 'path', 'triangle', 'stroke'];
     expect(calls).toHaveLength(ops.filter((o) => DRAW.includes(o.kind)).length);
     const expected = d.boxes.filter((b) => b.label !== '').map((b) => b.label);
     expect(labels.sort()).toEqual([...expected].sort());
@@ -472,6 +513,69 @@ describe('Canvas painter', () => {
     expect(ops.filter((o) => o.kind === 'fillText')).toHaveLength(
       d.boxes.filter((b) => b.label !== '').length
     );
+  });
+});
+
+describe('圆角几何（roundedPathD / 箭头）', () => {
+  it('点数退化：0 点空串、1 点 M、2 点 M L 且无 Q', () => {
+    expect(roundedPathD([], 4)).toBe('');
+    expect(roundedPathD([[1, 2]], 4)).toBe('M 1 2');
+    expect(roundedPathD([[1, 2], [30, 2]], 4)).toBe('M 1 2 L 30 2');
+    expect(roundedPathD([[1, 2], [30, 2]], 4)).not.toContain('Q');
+  });
+
+  it('直角拐点产生二次贝塞尔 Q', () => {
+    const d = roundedPathD([[0, 0], [10, 0], [10, 10]], 4);
+    expect(d).toContain('Q');
+    expect(d.startsWith('M 0 0')).toBe(true);
+    expect(d.endsWith('L 10 10')).toBe(true);
+  });
+
+  it('radius 大于半段长时 clamp，控制点不越界 / 不产生 NaN', () => {
+    const d = roundedPathD([[0, 0], [2, 0], [2, 2]], 100);
+    expect(d).not.toContain('NaN');
+    const nums = d.match(/-?\d+(\.\d+)?/g)?.map(Number) ?? [];
+    expect(nums.length).toBeGreaterThan(0);
+    for (const n of nums) expect(Number.isFinite(n)).toBe(true);
+    expect(Math.max(...nums)).toBeLessThanOrEqual(2);
+  });
+
+  it('共线拐点不产生曲线（退化为直线）', () => {
+    expect(roundedPathD([[0, 0], [10, 0], [20, 0]], 5)).toBe('M 0 0 L 10 0 L 20 0');
+  });
+
+  it('arrowHead 按 arrow 取尖点：head 末点 / tail 首点 / none 空', () => {
+    const base: DiagramPath = {
+      id: 'p',
+      points: [[0, 0], [10, 0], [10, 10]],
+      radius: 0,
+      arrow: 'none',
+      tone: 'loop'
+    };
+    expect(arrowHead(base)).toBeNull();
+    expect(arrowHead({ ...base, arrow: 'head' })).toEqual({ x: 10, y: 10, angle: Math.PI / 2 });
+    const tail = arrowHead({ ...base, arrow: 'tail' });
+    expect(tail?.x).toBe(0);
+    expect(tail?.y).toBe(0);
+  });
+
+  it('trianglePathD 生成闭合三角，尖点落在给定坐标', () => {
+    const d = trianglePathD(10, 10, 0);
+    expect(d.startsWith('M 10 10')).toBe(true);
+    expect(d).toMatch(/^M .+ L .+ L .+ Z$/);
+  });
+
+  it('SVG 回环渲染成圆角 path 且带实心三角箭头', () => {
+    const svg = renderSvg(diagramFor('a+'));
+    expect(svg).toContain('data-tone="loop"');
+    expect(svg).toContain('class="x-ac-regex-diagram__arrow"');
+    expect(svg).toMatch(/data-tone="loop"[^>]*d="[^"]*Q/);
+  });
+
+  it('Canvas 输出 path / triangle 指令', () => {
+    const ops = renderCanvasOps(diagramFor('a+'));
+    expect(ops.some((o) => o.kind === 'path')).toBe(true);
+    expect(ops.some((o) => o.kind === 'triangle')).toBe(true);
   });
 });
 

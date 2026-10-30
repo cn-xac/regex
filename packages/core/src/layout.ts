@@ -54,6 +54,32 @@ export interface DiagramEdge {
   readonly to: { readonly x: number; readonly y: number };
 }
 
+/**
+ * 连线的语义色调。**留扩展位**而非枚举死：未来"匹配步骤"视图会给同一批 path
+ * 上"已匹配 / 回溯中 / 失败"三色（见仓 AGENTS.md 架构约束）。当前 SVG/Canvas 都用
+ * 统一连线色渲染，tone 只随几何数据带出、暂不参与取色。
+ */
+export type PathTone = 'loop' | 'bypass' | 'choice';
+
+/**
+ * 一段**可圆角的折线路径**（回环 / min=0 旁路 / 交替分歧线）。
+ *
+ * 与 `DiagramEdge`（两点直线）的区别：一条 path 是 ≥2 个拐点组成的折线，painter 在
+ * 每个内拐点按 `radius` 用二次贝塞尔倒圆，观感对标 Regulex 的圆角连线。箭头由 `arrow`
+ * 表达（不再是两笔撇 chevron），落点与朝向由首/末段切线自动算，SVG 与 Canvas 共用同一几何。
+ */
+export interface DiagramPath {
+  readonly id: string;
+  /** 折线顶点序列（绝对坐标）。至少 2 点；相邻点不得重合。 */
+  readonly points: readonly (readonly [number, number])[];
+  /** 内拐点倒圆半径（px）。相邻段太短时 painter 会 clamp，不会自交。 */
+  readonly radius: number;
+  /** 'head' 箭头在末点、沿末段方向；'tail' 箭头在首点、沿首段方向；'none' 无箭头。 */
+  readonly arrow: 'none' | 'head' | 'tail';
+  readonly tone: PathTone;
+  readonly source?: SourceRange;
+}
+
 export interface DiagramMetrics {
   readonly charWidth: number;
   readonly lineHeight: number;
@@ -80,6 +106,7 @@ export interface Diagram {
   readonly height: number;
   readonly boxes: readonly DiagramBox[];
   readonly edges: readonly DiagramEdge[];
+  readonly paths: readonly DiagramPath[];
 }
 
 export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
@@ -95,6 +122,10 @@ export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
   tagFontSize: 11
 });
 
+/** 回环 / 旁路折线的内拐点倒圆半径（px）。对标 Regulex 的大圆角观感：roundedPathD 会按相邻段长
+ *  再 clamp，故这里给足大值即得尽量圆润的拱角，段短处自动收窄、不会自交。 */
+const RAIL_RADIUS = 12;
+
 interface Ctx {
   readonly m: DiagramMetrics;
   readonly locale: Locale;
@@ -103,6 +134,7 @@ interface Ctx {
 interface Placed {
   boxes: DiagramBox[];
   edges: DiagramEdge[];
+  paths: DiagramPath[];
   width: number;
   height: number;
   /** 主体**上方**已被标签/回环占用的高度，用于让嵌套的标注互相错开而不打架。 */
@@ -113,7 +145,7 @@ interface Placed {
 
 /** 只含主体盒、没有任何上方/下方标注的占位结果。 */
 function bare(boxes: DiagramBox[], edges: DiagramEdge[], width: number, height: number): Placed {
-  return { boxes, edges, width, height, above: 0, below: 0 };
+  return { boxes, edges, paths: [], width, height, above: 0, below: 0 };
 }
 
 /**
@@ -241,8 +273,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const base = inner.above + 4; // 回环水平段的上沿（从 inner.above 起叠，避免与组标签同层）
       const topY = -(base + arcH);
       const boxes: DiagramBox[] = [...inner.boxes];
-      const edges: DiagramEdge[] = [...inner.edges];
-      const ah = 5;
+      const paths: DiagramPath[] = [...inner.paths];
 
       // 弧的起落点取**被包元素的外缘**，而不是主体内容的 0 线：量化一个分组时，组框
       // 为了让出 `#N` 标签行而向上扩到负 y，只有从框顶起落才是「弧包框」；反过来组内
@@ -256,19 +287,23 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const right = inner.width + inset;
       const slotWidth = inner.width + inset * 2;
 
-      // 回环：右端上行 → 水平跨过被包元素 → 左端下行回到入口
-      edges.push({ id: `${idPath}.r1`, from: { x: right, y: frameTop }, to: { x: right, y: topY } });
-      edges.push({ id: `${idPath}.r2`, from: { x: right, y: topY }, to: { x: left, y: topY } });
-      edges.push({ id: `${idPath}.r3`, from: { x: left, y: topY }, to: { x: left, y: frameTop } });
-      // 箭头朝向即贪婪性：greedy 的箭头落在左端、指向被包元素（优先再绕一次）；
-      // lazy 的箭头在右端、指离元素（优先结束重复）。
-      if (greedy) {
-        edges.push({ id: `${idPath}.ah1`, from: { x: left - ah, y: frameTop - ah * 2 }, to: { x: left, y: frameTop - ah } });
-        edges.push({ id: `${idPath}.ah2`, from: { x: left + ah, y: frameTop - ah * 2 }, to: { x: left, y: frameTop - ah } });
-      } else {
-        edges.push({ id: `${idPath}.ah1`, from: { x: right - ah, y: topY + ah * 2 }, to: { x: right, y: topY + ah } });
-        edges.push({ id: `${idPath}.ah2`, from: { x: right + ah, y: topY + ah * 2 }, to: { x: right, y: topY + ah } });
-      }
+      // 回环：一条折线包住被包元素，四个直角拐点交由 painter 倒圆。点序固定
+      // [右框顶 → 右上 → 左上 → 左框顶]，于是 'head' 落在左端（朝下接回入口）、
+      // 'tail' 落在右端（朝上指离元素）—— 与原「greedy 箭头在左 / lazy 在右」的不变量一致。
+      // 箭头由 arrow 表达，不再画 chevron 两笔撇。
+      paths.push({
+        id: `${idPath}.r`,
+        points: [
+          [right, frameTop],
+          [right, topY],
+          [left, topY],
+          [left, frameTop]
+        ],
+        radius: RAIL_RADIUS,
+        arrow: greedy ? 'head' : 'tail',
+        tone: 'loop',
+        source: { start: node.start, end: node.end }
+      });
 
       let labelW = 0;
       if (label !== '') {
@@ -297,18 +332,27 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
         // min === 0 的「可以整段跳过」走下方旁路，不与回环抢上方空间；起落点同样用框底。
         const skipDepth = inner.below + 4 + arcH;
         const sy = inner.height + skipDepth;
-        edges.push({ id: `${idPath}.s1`, from: { x: left, y: frameBottom }, to: { x: left, y: sy } });
-        edges.push({ id: `${idPath}.s2`, from: { x: left, y: sy }, to: { x: right, y: sy } });
-        edges.push({ id: `${idPath}.s3`, from: { x: right, y: sy }, to: { x: right, y: frameBottom } });
-        // 旁路也要有箭头，否则那条 U 形线读起来像「框的残影」，看不出是跳过路径
-        edges.push({ id: `${idPath}.sh1`, from: { x: right - ah * 2, y: sy - ah }, to: { x: right - ah, y: sy } });
-        edges.push({ id: `${idPath}.sh2`, from: { x: right - ah * 2, y: sy + ah }, to: { x: right - ah, y: sy } });
+        // 旁路：左框底 → 下 → 右 → 上回右框底；箭头在末点表示「整段跳过」的流向。
+        paths.push({
+          id: `${idPath}.s`,
+          points: [
+            [left, frameBottom],
+            [left, sy],
+            [right, sy],
+            [right, frameBottom]
+          ],
+          radius: RAIL_RADIUS,
+          arrow: 'head',
+          tone: 'bypass',
+          source: { start: node.start, end: node.end }
+        });
         below = skipDepth;
       }
 
       return {
         boxes,
-        edges,
+        edges: inner.edges,
+        paths,
         // 占位宽只由被包元素 + 弧 inset 决定，**不含标签宽**（标签可溢出，见上注释）
         width: slotWidth,
         height: inner.height,
@@ -357,6 +401,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
           ...shift(inner.boxes, padX, 0)
         ],
         edges: [...shiftEdges(inner.edges, padX, 0)],
+        paths: shiftPaths(inner.paths, padX, 0),
         width: inner.width + padX * 2,
         height: inner.height,
         above: tagBase + tagH + padY,
@@ -414,6 +459,7 @@ function placeSequence(node: AstNode, idPath: string, depth: number, ctx: Ctx): 
 
   const boxes: DiagramBox[] = [];
   const edges: DiagramEdge[] = [];
+  const paths: DiagramPath[] = [];
   // 必须先量完所有子项再居中：边推进边抬高 height 会让越靠右的盒子基准越高。
   const height = placed.reduce((max, p) => Math.max(max, p.height), ctx.m.leafHeight);
   let x = 0;
@@ -421,6 +467,7 @@ function placeSequence(node: AstNode, idPath: string, depth: number, ctx: Ctx): 
     const offsetY = Math.round((height - p.height) / 2);
     boxes.push(...shift(p.boxes, x, offsetY));
     edges.push(...shiftEdges(p.edges, x, offsetY));
+    paths.push(...shiftPaths(p.paths, x, offsetY));
     if (i > 0) {
       edges.push({
         id: `${idPath}.c${i}`,
@@ -432,7 +479,7 @@ function placeSequence(node: AstNode, idPath: string, depth: number, ctx: Ctx): 
   });
   const above = placed.reduce((max, p) => Math.max(max, p.above), 0);
   const below = placed.reduce((max, p) => Math.max(max, p.below), 0);
-  return { boxes, edges, width: Math.max(0, x - ctx.m.gapX), height, above, below };
+  return { boxes, edges, paths, width: Math.max(0, x - ctx.m.gapX), height, above, below };
 }
 
 function placeRun(text: string, start: number, end: number, id: string, depth: number, ctx: Ctx): Placed {
@@ -449,6 +496,7 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
   const m = ctx.m;
   const boxes: DiagramBox[] = [];
   const edges: DiagramEdge[] = [];
+  const paths: DiagramPath[] = [];
   const branches = node.children.map((child, i) => place(child, `${idPath}.${i}`, depth, ctx));
   const width = branches.reduce((max, b) => Math.max(max, b.width), 0);
   // 每个分支按「上方标注 + 主体 + 下方旁路」占一个槽位，主体落在槽内 ——
@@ -460,8 +508,10 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
   const mids: number[] = [];
   let offset = 0;
   branches.forEach((branch) => {
-    const bodyTop = offset + branch.above;    boxes.push(...shift(branch.boxes, m.gapX, bodyTop));
+    const bodyTop = offset + branch.above;
+    boxes.push(...shift(branch.boxes, m.gapX, bodyTop));
     edges.push(...shiftEdges(branch.edges, m.gapX, bodyTop));
+    paths.push(...shiftPaths(branch.paths, m.gapX, bodyTop));
     mids.push(bodyTop + branch.height / 2);
     offset = bodyTop + branch.height + branch.below + m.gapY;
   });
@@ -469,21 +519,39 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
   const first = mids[0] ?? m.leafHeight / 2;
   const last = mids[mids.length - 1] ?? first;
   const spineY = (first + last) / 2; // 分歧/汇聚中线取首末主体中线的中点
+  const rightEdge = width + m.gapX * 2;
 
   branches.forEach((branch, i) => {
     const midY = mids[i] ?? spineY;
-    edges.push({ id: `${idPath}.in${i}`, from: { x: 0, y: spineY }, to: { x: m.gapX, y: midY } });
-    edges.push({
+    // 分歧线：从入口中线 (0, spineY) 斜插到分支中线 (gapX, midY)。两点即直线段（无拐点
+    // 不产生圆角），归入 paths 体系，与回环/旁路共用同一套渲染。汇聚线同理镜像。
+    paths.push({
+      id: `${idPath}.in${i}`,
+      points: [
+        [0, spineY],
+        [m.gapX, midY]
+      ],
+      radius: 0,
+      arrow: 'none',
+      tone: 'choice'
+    });
+    paths.push({
       id: `${idPath}.out${i}`,
-      from: { x: m.gapX + branch.width, y: midY },
-      to: { x: width + m.gapX * 2, y: spineY }
+      points: [
+        [m.gapX + branch.width, midY],
+        [rightEdge, spineY]
+      ],
+      radius: 0,
+      arrow: 'none',
+      tone: 'choice'
     });
   });
 
   return {
     boxes,
     edges,
-    width: width + m.gapX * 2,
+    paths,
+    width: rightEdge,
     height: Math.max(m.leafHeight, totalSlots),
     above: 0, // 上方标注已内化进 slot，外层不必再扩
     below: 0
@@ -500,6 +568,17 @@ function shiftEdges(edges: readonly DiagramEdge[], dx: number, dy: number): Diag
       id: e.id,
       from: Object.freeze({ x: e.from.x + dx, y: e.from.y + dy }),
       to: Object.freeze({ x: e.to.x + dx, y: e.to.y + dy })
+    })
+  );
+}
+
+function shiftPaths(paths: readonly DiagramPath[], dx: number, dy: number): DiagramPath[] {
+  return paths.map((p) =>
+    Object.freeze({
+      ...p,
+      points: Object.freeze(
+        p.points.map((pt) => Object.freeze([pt[0] + dx, pt[1] + dy] as [number, number]))
+      )
     })
   );
 }
@@ -532,6 +611,15 @@ export function layoutRailroad(ast: AstNode, options: LayoutOptions = {}): Diagr
     maxX = Math.max(maxX, e.from.x, e.to.x);
     maxY = Math.max(maxY, e.from.y, e.to.y);
   }
+  // 圆角是**内缩**拐角，故折线顶点是路径的外接上界 —— 用顶点算 bbox 不会裁掉曲线。
+  for (const p of placed.paths) {
+    for (const [px, py] of p.points) {
+      minX = Math.min(minX, px);
+      minY = Math.min(minY, py);
+      maxX = Math.max(maxX, px);
+      maxY = Math.max(maxY, py);
+    }
+  }
   if (!Number.isFinite(minX)) {
     minX = 0;
     minY = 0;
@@ -543,8 +631,9 @@ export function layoutRailroad(ast: AstNode, options: LayoutOptions = {}): Diagr
   return Object.freeze({
     width: Math.max(m.minWidth, maxX - minX + pad),
     height: Math.max(m.leafHeight, maxY - minY + pad),
-    // shift/shiftEdges 内已逐元素冻结，这里只冻结数组本身
+    // shift/shiftEdges/shiftPaths 内已逐元素冻结，这里只冻结数组本身
     boxes: Object.freeze(shift(placed.boxes, m.padX - minX, m.padY - minY)),
-    edges: Object.freeze(shiftEdges(placed.edges, m.padX - minX, m.padY - minY))
+    edges: Object.freeze(shiftEdges(placed.edges, m.padX - minX, m.padY - minY)),
+    paths: Object.freeze(shiftPaths(placed.paths, m.padX - minX, m.padY - minY))
   });
 }

@@ -10,7 +10,7 @@
  * 导出场景要留意：宿主页面的 CSS 不会跟着 `innerHTML` 走，所以 SVG 里**内联**了按 tone
  * 分配的颜色，同时保留 `class` 与 `data-*` 让宿主可选择性覆盖。
  */
-import type { Diagram, DiagramBox, BoxTone } from './layout';
+import type { Diagram, DiagramBox, DiagramPath, BoxTone } from './layout';
 
 export type SvgTheme = 'light' | 'dark';
 
@@ -55,11 +55,103 @@ const DARK: Readonly<Record<BoxTone, Paint>> = Object.freeze({
 });
 
 const EDGE_COLOR: Readonly<Record<SvgTheme, string>> = Object.freeze({
-  light: '#64748b',
-  dark: '#8fa0b4'
+  // 实测自 Regulex bundle：主干与回环用深灰近黑（#333）、线宽 2。浅色主题取近黑的 #333，
+  // 深色主题相应提亮以保证在深背景上仍是「轨道」而非浅灰细线。
+  light: '#333333',
+  dark: '#c9d1d9'
 });
 
+/** 连线的统一粗细（px）。对标 Regulex 的轨道线宽。 */
+const EDGE_WIDTH = 2;
+
 const DEFAULT_FONT = "ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, monospace";
+
+/** 箭头三角形的边长（px）。 */
+const ARROW_SIZE = 6;
+
+function pt(v: readonly [number, number]): string {
+  return `${round(v[0])} ${round(v[1])}`;
+}
+
+/**
+ * 折线顶点 → **圆角 SVG path 的 `d` 字符串**。这是 SVG / Canvas 共用的圆角几何口径：
+ * 每个内拐点按 `radius` 用二次贝塞尔倒圆，相邻段太短时把 `radius` clamp 到半段长
+ * （否则贝塞尔控制点越过邻点、路径自交），共线拐点不产生曲线（退化为直线）。
+ *
+ * 点数退化约定：0 → `''`；1 → `M`；2 → `M L`（无拐点故无圆角）。
+ */
+export function roundedPathD(points: readonly (readonly [number, number])[], radius: number): string {
+  const n = points.length;
+  if (n === 0) return '';
+  if (n === 1) return `M ${pt(points[0] as readonly [number, number])}`;
+  if (n === 2) {
+    return `M ${pt(points[0] as readonly [number, number])} L ${pt(points[1] as readonly [number, number])}`;
+  }
+  const parts: string[] = [`M ${pt(points[0] as readonly [number, number])}`];
+  for (let i = 1; i < n - 1; i++) {
+    const prev = points[i - 1] as readonly [number, number];
+    const cur = points[i] as readonly [number, number];
+    const next = points[i + 1] as readonly [number, number];
+    const d1 = Math.hypot(cur[0] - prev[0], cur[1] - prev[1]);
+    const d2 = Math.hypot(next[0] - cur[0], next[1] - cur[1]);
+    const cross = (cur[0] - prev[0]) * (next[1] - cur[1]) - (cur[1] - prev[1]) * (next[0] - cur[0]);
+    const r = Math.min(radius, d1 / 2, d2 / 2);
+    // 共线（叉积≈0）或退化段长（相邻点重合，d 为 0）→ 直接连到拐点，不画圆角。
+    if (r <= 0 || Math.abs(cross) < 1e-6) {
+      parts.push(`L ${pt(cur)}`);
+      continue;
+    }
+    const a: readonly [number, number] = [
+      cur[0] + (prev[0] - cur[0]) * (r / d1),
+      cur[1] + (prev[1] - cur[1]) * (r / d1)
+    ];
+    const b: readonly [number, number] = [
+      cur[0] + (next[0] - cur[0]) * (r / d2),
+      cur[1] + (next[1] - cur[1]) * (r / d2)
+    ];
+    parts.push(`L ${pt(a)}`);
+    parts.push(`Q ${pt(cur)} ${pt(b)}`);
+  }
+  parts.push(`L ${pt(points[n - 1] as readonly [number, number])}`);
+  return parts.join(' ');
+}
+
+/**
+ * path 的箭头落点与朝向角（弧度）。`'none'` 或点数不足返回 null。
+ *
+ * 朝向即流动方向：`'head'` 取末段方向、尖在末点；`'tail'` 取首段方向、尖在首点。
+ * 回环用它区分贪婪性（head 落左端朝下接回入口 / tail 落右端朝上指离元素）。
+ */
+export function arrowHead(path: DiagramPath): { x: number; y: number; angle: number } | null {
+  if (path.arrow === 'none') return null;
+  const pts = path.points;
+  if (pts.length < 2) return null;
+  const last = pts[pts.length - 1] as readonly [number, number];
+  const secondLast = pts[pts.length - 2] as readonly [number, number];
+  const first = pts[0] as readonly [number, number];
+  const second = pts[1] as readonly [number, number];
+  const tip = path.arrow === 'head' ? last : first;
+  const from = path.arrow === 'head' ? secondLast : second;
+  const dx = tip[0] - from[0];
+  const dy = tip[1] - from[1];
+  if (dx === 0 && dy === 0) return null;
+  return { x: tip[0], y: tip[1], angle: Math.atan2(dy, dx) };
+}
+
+/** 以 (x,y) 为尖、沿 angle 方向展开的实心三角的 SVG `d`（与 arrowHead 共用同一朝向）。 */
+export function trianglePathD(x: number, y: number, angle: number, size = ARROW_SIZE): string {
+  const ux = Math.cos(angle);
+  const uy = Math.sin(angle);
+  const bx = x - ux * size;
+  const by = y - uy * size;
+  const px = -uy * (size / 2);
+  const py = ux * (size / 2);
+  return (
+    `M ${round(x)} ${round(y)} ` +
+    `L ${round(bx + px)} ${round(by + py)} ` +
+    `L ${round(bx - px)} ${round(by - py)} Z`
+  );
+}
 
 /** XML 文本转义。label 里必然出现 `<` `>` `&`（如 `(?<year>`），漏转义会直接产坏 XML。 */
 export function escapeXml(value: string): string {
@@ -103,12 +195,35 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
     '<title>Regular expression railroad diagram</title>'
   ];
 
-  parts.push('<g class="x-ac-regex-diagram__edges" stroke="' + edge + '" stroke-width="1.5" fill="none">');
+  parts.push('<g class="x-ac-regex-diagram__edges" stroke="' + edge + '" stroke-width="' + EDGE_WIDTH + '" fill="none">');
   for (const e of diagram.edges) {
     parts.push(
       `<line data-id="${escapeXml(e.id)}" x1="${round(e.from.x)}" y1="${round(e.from.y)}"` +
         ` x2="${round(e.to.x)}" y2="${round(e.to.y)}"/>`
     );
+  }
+  parts.push('</g>');
+
+  // 圆角折线（回环 / 旁路 / 分歧线）与实心三角箭头。箭头单独 fill 连线色、无描边。
+  parts.push('<g class="x-ac-regex-diagram__paths" stroke="' + edge + '" stroke-width="' + EDGE_WIDTH + '" fill="none">');
+  for (const p of diagram.paths) {
+    const d = roundedPathD(p.points, p.radius);
+    // 非贪婪回环用虚线标识（对标 Regulex 以实线/虚线区分贪懒）；旁路与分歧线仍为实线。
+    const dash = p.tone === 'loop' && p.arrow === 'tail';
+    if (d !== '') {
+      parts.push(
+        `<path data-id="${escapeXml(p.id)}" data-tone="${p.tone}"` +
+          (dash ? ' stroke-dasharray="5 4"' : '') +
+          ` d="${d}"/>`
+      );
+    }
+    const head = arrowHead(p);
+    if (head !== null) {
+      parts.push(
+        `<path class="x-ac-regex-diagram__arrow" d="${trianglePathD(head.x, head.y, head.angle)}"` +
+          ` fill="${edge}" stroke="none"/>`
+      );
+    }
   }
   parts.push('</g>');
 
@@ -127,7 +242,7 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
     if (!tag) {
       parts.push(
         `<rect x="${round(box.x)}" y="${round(box.y)}" width="${round(box.w)}" height="${round(box.h)}"` +
-          ` rx="4" fill="${paint.fill}" stroke="${paint.stroke}"/>`
+          ` rx="8" fill="${paint.fill}" stroke="${paint.stroke}"/>`
       );
     }
     if (box.label !== '') {
@@ -159,6 +274,13 @@ export type CanvasOp =
   | { readonly kind: 'beginPath' }
   | { readonly kind: 'moveTo'; readonly x: number; readonly y: number }
   | { readonly kind: 'lineTo'; readonly x: number; readonly y: number }
+  | {
+      readonly kind: 'path';
+      readonly points: readonly (readonly [number, number])[];
+      readonly radius: number;
+      readonly dash: boolean;
+    }
+  | { readonly kind: 'triangle'; readonly x: number; readonly y: number; readonly angle: number }
   | { readonly kind: 'stroke' };
 
 /**
@@ -170,7 +292,7 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
   const font = options.fontFamily ?? DEFAULT_FONT;
   const size = fontSizeOf(options);
   const edge = EDGE_COLOR[options.theme === 'dark' ? 'dark' : 'light'];
-  const ops: CanvasOp[] = [{ kind: 'setLineWidth', value: 1.5 }];
+  const ops: CanvasOp[] = [{ kind: 'setLineWidth', value: EDGE_WIDTH }];
 
   ops.push({ kind: 'setStroke', value: edge }, { kind: 'beginPath' });
   for (const e of diagram.edges) {
@@ -178,6 +300,21 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
     ops.push({ kind: 'lineTo', x: round(e.to.x), y: round(e.to.y) });
   }
   ops.push({ kind: 'stroke' });
+
+  // 每条 path 单独成一条 beginPath…stroke（多条回环不能连成一团）。箭头是实心三角，单独 fill。
+  for (const p of diagram.paths) {
+    ops.push(
+      { kind: 'setLineWidth', value: EDGE_WIDTH },
+      { kind: 'setStroke', value: edge },
+      { kind: 'beginPath' },
+      { kind: 'path', points: p.points, radius: p.radius, dash: p.tone === 'loop' && p.arrow === 'tail' },
+      { kind: 'stroke' }
+    );
+    const head = arrowHead(p);
+    if (head !== null) {
+      ops.push({ kind: 'setFill', value: edge }, { kind: 'triangle', x: head.x, y: head.y, angle: head.angle });
+    }
+  }
 
   ops.push(
     { kind: 'setFont', value: `${size}px ${font}` },
@@ -224,6 +361,11 @@ export interface PaintContext {
   beginPath(): void;
   moveTo(x: number, y: number): void;
   lineTo(x: number, y: number): void;
+  /** 画一条圆角折线（宿主用 arcTo / quadraticCurveTo 落地，radius 为内拐点倒圆半径；
+   *  dash=true 时宿主应 setLineDash 画虚线，用于非贪婪回环）。 */
+  path(points: readonly (readonly [number, number])[], radius: number, dash: boolean): void;
+  /** 画一个实心三角（以 (x,y) 为尖、angle 为朝向，用于回环箭头）。 */
+  triangle(x: number, y: number, angle: number): void;
   stroke(): void;
 }
 
@@ -259,6 +401,12 @@ export function applyCanvasOps(ops: readonly CanvasOp[], ctx: PaintContext): voi
         break;
       case 'lineTo':
         ctx.lineTo(op.x, op.y);
+        break;
+      case 'path':
+        ctx.path(op.points, op.radius, op.dash);
+        break;
+      case 'triangle':
+        ctx.triangle(op.x, op.y, op.angle);
         break;
       case 'stroke':
         ctx.stroke();

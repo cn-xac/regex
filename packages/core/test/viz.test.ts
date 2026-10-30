@@ -436,7 +436,10 @@ describe('Canvas painter', () => {
     'setLineWidth',
     'setFont',
     'setTextBaseline',
-    'strokeRect',
+    'setTextAlign',
+    'setLineDash',
+    'rect',
+    'fill',
     'fillText',
     'beginPath',
     'moveTo',
@@ -471,7 +474,10 @@ describe('Canvas painter', () => {
       lineWidth: 0,
       font: '',
       textBaseline: '',
-      strokeRect: () => calls.push('strokeRect'),
+      textAlign: '',
+      rect: () => calls.push('rect'),
+      fill: () => calls.push('fill'),
+      setLineDash: () => calls.push('setLineDash'),
       fillText: (text) => {
         calls.push('fillText');
         labels.push(text);
@@ -484,8 +490,8 @@ describe('Canvas painter', () => {
     };
     const ops = renderCanvasOps(d);
     applyCanvasOps(ops, ctx);
-    // setStroke / setFill / setLineWidth / setFont 只做属性赋值，不产生方法调用
-    const DRAW: readonly string[] = ['strokeRect', 'fillText', 'beginPath', 'moveTo', 'lineTo', 'path', 'stroke'];
+    // setStroke / setFill / setLineWidth / setFont / setTextBaseline / setTextAlign 只做属性赋值，不产生方法调用
+    const DRAW: readonly string[] = ['rect', 'fill', 'setLineDash', 'fillText', 'beginPath', 'moveTo', 'lineTo', 'path', 'stroke'];
     expect(calls).toHaveLength(ops.filter((o) => DRAW.includes(o.kind)).length);
     const expected = d.boxes.filter((b) => b.label !== '').map((b) => b.label);
     expect(labels.sort()).toEqual([...expected].sort());

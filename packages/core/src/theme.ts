@@ -11,11 +11,18 @@
  */
 import type { BoxTone } from './layout';
 
-/** 单个盒子三要素：描边、填充、文字色。`#00000000` 表示透明（SVG/Canvas 均认）。 */
+/**
+ * 单个盒子三要素 + 观感几何。对标 Regulex「填充圆角矩形无描边、文字叠上、按语义分半径」：
+ * - `radius`：圆角半径（实测源码：`.` r10 / 反向引用 r8 / 组容器 r6 / 类成员与预定义类 r5）；
+ * - `dash`：容器型盒子（透明填充 + 虚线描边，如捕获组 / 断言）的边框虚线，`null`=实线填充盒。
+ * `#00000000` 表示透明；透明填充即视为容器（painter 据此走「描边」而非「填充」）。
+ */
 export interface BoxPaint {
   readonly stroke: string;
   readonly fill: string;
   readonly text: string;
+  readonly radius: number;
+  readonly dash: readonly number[] | null;
 }
 
 /** 连线的语义档位。回环/旁路按贪婪性拆分，非贪婪档带虚线。 */
@@ -37,8 +44,16 @@ export interface ThemePalette {
 /** 内置主题名。自定义主题用任意字符串名（走注册表）。 */
 export type SvgTheme = 'light' | 'dark';
 
-const box = (stroke: string, fill: string, text: string): BoxPaint =>
-  Object.freeze({ stroke, fill, text });
+const box = (
+  stroke: string,
+  fill: string,
+  text: string,
+  radius: number,
+  dash: readonly number[] | null = null
+): BoxPaint => Object.freeze({ stroke, fill, text, radius, dash });
+
+/** 容器型（透明填充 + 虚线描边）边框虚线。 */
+const CONTAINER_DASH: readonly number[] = [2, 3];
 
 /** 连线档：stroke 色 + 宽 2 + 可选虚线（对标 Regulex 轨道线宽与实/虚分贪懒）。 */
 const line = (stroke: string, dash: readonly number[] | null = null): LinePaint =>
@@ -70,17 +85,17 @@ function lines(
 export const LIGHT: ThemePalette = Object.freeze({
   name: 'light',
   box: Object.freeze({
-    text: box('#475569', '#ffffff', '#0f172a'),
-    dot: box('#475569', '#e2e8f0', '#0f172a'),
-    escape: box('#1c63b5', '#e7f0fa', '#123a63'),
-    characterClass: box('#6741d9', '#f1e9fd', '#3d2580'),
-    anchor: box('#b8860b', '#fdf3d8', '#6b4e05'),
-    assertion: box('#2b8a3e', '#e6f5e9', '#175c28'),
-    backreference: box('#c2410c', '#fdeadd', '#7c2a08'),
-    group: box('#1c63b5', '#00000000', '#123a63'),
-    choice: box('#94a3b8', '#00000000', '#0f172a'),
-    tagQuantifier: box('#00000000', '#00000000', '#b8860b'),
-    tagGroupPrefix: box('#00000000', '#00000000', '#1c63b5')
+    text: box('#00000000', '#eef2f7', '#0f172a', 6),
+    dot: box('#00000000', '#c2e0c2', '#143414', 10),
+    escape: box('#00000000', '#a3d0a3', '#123a1e', 5),
+    characterClass: box('#00000000', '#c8b6f0', '#2d1660', 5),
+    anchor: box('#00000000', '#f2d38a', '#5a3d05', 6),
+    assertion: box('#2b8a3e', '#00000000', '#175c28', 6, CONTAINER_DASH),
+    backreference: box('#00000000', '#86a7d6', '#10233f', 8),
+    group: box('#1c63b5', '#00000000', '#123a63', 6, CONTAINER_DASH),
+    choice: box('#94a3b8', '#00000000', '#0f172a', 6, CONTAINER_DASH),
+    tagQuantifier: box('#00000000', '#00000000', '#b8860b', 0),
+    tagGroupPrefix: box('#00000000', '#00000000', '#1c63b5', 0)
   }),
   line: lines('#333333', '#800000', '#a52a2a', '#006400')
 });
@@ -88,17 +103,17 @@ export const LIGHT: ThemePalette = Object.freeze({
 export const DARK: ThemePalette = Object.freeze({
   name: 'dark',
   box: Object.freeze({
-    text: box('#94a3b8', '#1b2028', '#e6eaf0'),
-    dot: box('#94a3b8', '#252c37', '#e6eaf0'),
-    escape: box('#74c0fc', '#16283c', '#bfe0ff'),
-    characterClass: box('#b197fc', '#251a3d', '#ddcdff'),
-    anchor: box('#ffd43b', '#33290c', '#ffe9a8'),
-    assertion: box('#69db7c', '#12291a', '#c6f5d0'),
-    backreference: box('#ffa94d', '#341a08', '#ffd8b0'),
-    group: box('#74c0fc', '#00000000', '#bfe0ff'),
-    choice: box('#64748b', '#00000000', '#e6eaf0'),
-    tagQuantifier: box('#00000000', '#00000000', '#ffd43b'),
-    tagGroupPrefix: box('#00000000', '#00000000', '#74c0fc')
+    text: box('#00000000', '#252c37', '#e6eaf0', 6),
+    dot: box('#00000000', '#274d33', '#c6f5d0', 10),
+    escape: box('#00000000', '#274d33', '#c6f5d0', 5),
+    characterClass: box('#00000000', '#3a2c66', '#ddcdff', 5),
+    anchor: box('#00000000', '#4a3d12', '#ffe9a8', 6),
+    assertion: box('#69db7c', '#00000000', '#c6f5d0', 6, CONTAINER_DASH),
+    backreference: box('#00000000', '#4d3a1a', '#ffd8b0', 8),
+    group: box('#74c0fc', '#00000000', '#bfe0ff', 6, CONTAINER_DASH),
+    choice: box('#64748b', '#00000000', '#e6eaf0', 6, CONTAINER_DASH),
+    tagQuantifier: box('#00000000', '#00000000', '#ffd43b', 0),
+    tagGroupPrefix: box('#00000000', '#00000000', '#74c0fc', 0)
   }),
   line: lines('#c9d1d9', '#e5534b', '#d3966f', '#6fbf73')
 });

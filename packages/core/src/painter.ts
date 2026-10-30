@@ -166,18 +166,29 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
         ` data-tone="${box.tone}" data-depth="${box.depth}"${attrs}>`
     );
     if (!tag) {
+      // 对标 Regulex：填充圆角矩形**无描边**；透明填充的（组 / 断言 / 交替容器）走虚线描边。
+      // 圆角半径按 tone 从主题取（`.` 10 / 反向引用 8 / 容器 6 / 类成员 5）。
+      const isContainer = paint.fill === '#00000000';
+      const dashAttr =
+        isContainer && paint.dash !== null ? ` stroke-dasharray="${paint.dash.join(' ')}"` : '';
       parts.push(
         `<rect x="${round(box.x)}" y="${round(box.y)}" width="${round(box.w)}" height="${round(box.h)}"` +
-          ` rx="8" fill="${paint.fill}" stroke="${paint.stroke}"/>`
+          ` rx="${paint.radius}"` +
+          (isContainer
+            ? ` fill="none" stroke="${paint.stroke}"${dashAttr}`
+            : ` fill="${paint.fill}" stroke="none"`) +
+          '/>'
       );
     }
     if (box.label !== '') {
-      // 垂直居中只做一次：交给 dominant-baseline，不再叠加半个字号的位移。
-      // 标注盒用几何层带来的较小字号（字号属于排版决定，painter 不自行发明）。
+      // 垂直居中交给 dominant-baseline，不再叠加半个字号位移。
+      // 叶子盒子文字**水平居中**（对标 Regulex text-anchor:middle）；标注盒子仍左对齐（其坐标由几何层排布）。
       const fs = box.fontSize ?? size;
+      const anchor = tag ? 'start' : 'middle';
+      const tx = round(box.x + (tag ? 0 : box.w / 2));
       parts.push(
-        `<text x="${round(box.x + (tag ? 0 : 6))}" y="${round(box.y + box.h / 2)}"` +
-          ` font-size="${fs}" dominant-baseline="central" text-anchor="start" fill="${paint.text}">` +
+        `<text x="${tx}" y="${round(box.y + box.h / 2)}"` +
+          ` font-size="${fs}" dominant-baseline="central" text-anchor="${anchor}" fill="${paint.text}">` +
           `${escapeXml(box.label)}</text>`
       );
     }
@@ -195,7 +206,9 @@ export type CanvasOp =
   | { readonly kind: 'setLineWidth'; readonly value: number }
   | { readonly kind: 'setFont'; readonly value: string }
   | { readonly kind: 'setTextBaseline'; readonly value: string }
-  | { readonly kind: 'strokeRect'; readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+  | { readonly kind: 'setTextAlign'; readonly value: string }
+  | { readonly kind: 'setLineDash'; readonly dash: readonly number[] | null }
+  | { readonly kind: 'rect'; readonly x: number; readonly y: number; readonly w: number; readonly h: number; readonly radius: number }
   | { readonly kind: 'fillText'; readonly text: string; readonly x: number; readonly y: number }
   | { readonly kind: 'beginPath' }
   | { readonly kind: 'moveTo'; readonly x: number; readonly y: number }
@@ -207,6 +220,7 @@ export type CanvasOp =
       /** 虚线段长数组；`null` 为实线。宿主应据此 setLineDash。 */
       readonly dash: readonly number[] | null;
     }
+  | { readonly kind: 'fill' }
   | { readonly kind: 'stroke' };
 
 /**
@@ -243,26 +257,43 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
 
   ops.push(
     { kind: 'setFont', value: `${size}px ${font}` },
-    // 与 SVG 后端同一套居中口径：由 baseline 负责，不叠加半个字号位移
-    { kind: 'setTextBaseline', value: 'middle' }
+    // 与 SVG 后端同一套居中口径：baseline 与 align 各自负责一个轴向，不叠加位移。
+    { kind: 'setTextBaseline', value: 'middle' },
+    { kind: 'setTextAlign', value: 'center' }
   );
   for (const box of diagram.boxes) {
     const paint = theme.box[box.tone];
     const tag = isTagTone(box.tone);
     if (!tag) {
-      ops.push({ kind: 'setFill', value: paint.fill }, { kind: 'setStroke', value: paint.stroke });
-      ops.push({ kind: 'strokeRect', x: round(box.x), y: round(box.y), w: round(box.w), h: round(box.h) });
+      // 填充圆角矩形无描边；透明填充（组 / 断言 / 交替容器）走虚线描边。radius 按 tone 取。
+      const isContainer = paint.fill === '#00000000';
+      const dash = isContainer && paint.dash !== null ? paint.dash : null;
+      ops.push({ kind: 'setLineDash', dash });
+      if (isContainer) {
+        ops.push(
+          { kind: 'setStroke', value: paint.stroke },
+          { kind: 'rect', x: round(box.x), y: round(box.y), w: round(box.w), h: round(box.h), radius: paint.radius },
+          { kind: 'stroke' }
+        );
+      } else {
+        ops.push(
+          { kind: 'setFill', value: paint.fill },
+          { kind: 'rect', x: round(box.x), y: round(box.y), w: round(box.w), h: round(box.h), radius: paint.radius },
+          { kind: 'fill' }
+        );
+      }
     }
     if (box.label !== '') {
-      // 字号随几何层给出的值下发，保证 Canvas 与 SVG 用同一套字号
+      // 字号随几何层给出的值下发，保证 Canvas 与 SVG 用同一套字号；文字水平居中（标注盒左对齐）。
       ops.push(
         { kind: 'setFont', value: `${box.fontSize ?? size}px ${font}` },
+        { kind: 'setTextAlign', value: tag ? 'left' : 'center' },
         { kind: 'setFill', value: paint.text }
       );
       ops.push({
         kind: 'fillText',
         text: box.label,
-        x: round(box.x + (tag ? 0 : 6)),
+        x: round(box.x + (tag ? 0 : box.w / 2)),
         y: round(box.y + box.h / 2)
       });
     }
@@ -281,7 +312,9 @@ export interface PaintContext {
   lineWidth: number;
   font: string;
   textBaseline: string;
-  strokeRect(x: number, y: number, w: number, h: number): void;
+  textAlign: string;
+  /** 定义一个圆角矩形路径（宿主内部先 beginPath，再 roundRect 或四角 arcTo；不自动填充/描边）。 */
+  rect(x: number, y: number, w: number, h: number, radius: number): void;
   fillText(text: string, x: number, y: number): void;
   beginPath(): void;
   moveTo(x: number, y: number): void;
@@ -289,6 +322,8 @@ export interface PaintContext {
   /** 画一条圆角折线（宿主用 arcTo / quadraticCurveTo 落地，radius 为内拐点倒圆半径；
    *  dash 为虚线段长数组，非 null 时宿主应 setLineDash 画虚线，用于非贪婪回环/旁路）。 */
   path(points: readonly (readonly [number, number])[], radius: number, dash: readonly number[] | null): void;
+  setLineDash(dash: readonly number[] | null): void;
+  fill(): void;
   stroke(): void;
 }
 
@@ -310,8 +345,17 @@ export function applyCanvasOps(ops: readonly CanvasOp[], ctx: PaintContext): voi
       case 'setTextBaseline':
         ctx.textBaseline = op.value;
         break;
-      case 'strokeRect':
-        ctx.strokeRect(op.x, op.y, op.w, op.h);
+      case 'setTextAlign':
+        ctx.textAlign = op.value;
+        break;
+      case 'setLineDash':
+        ctx.setLineDash(op.dash);
+        break;
+      case 'rect':
+        ctx.rect(op.x, op.y, op.w, op.h, op.radius);
+        break;
+      case 'fill':
+        ctx.fill();
         break;
       case 'fillText':
         ctx.fillText(op.text, op.x, op.y);

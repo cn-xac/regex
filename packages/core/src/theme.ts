@@ -40,25 +40,30 @@ export type SvgTheme = 'light' | 'dark';
 const box = (stroke: string, fill: string, text: string): BoxPaint =>
   Object.freeze({ stroke, fill, text });
 
-/** 连线档：默认实线、宽 2（对标 Regulex 轨道线宽）。 */
+/** 连线档：stroke 色 + 宽 2 + 可选虚线（对标 Regulex 轨道线宽与实/虚分贪懒）。 */
 const line = (stroke: string, dash: readonly number[] | null = null): LinePaint =>
   Object.freeze({ stroke, width: 2, dash });
 
-const LINE_COLOR_LIGHT = '#333333';
-const LINE_COLOR_DARK = '#c9d1d9';
-
 /**
- * 用同一根主线色填满所有 `line` 档 —— 保持观感与重构前逐连线取 `EDGE_COLOR[theme]` 完全一致。
- * 观感对齐增量会把 loop/bypass 各档替换成 Regulex 的 maroon/brown/darkgreen 分色。
+ * 连线的六档配色。对标 Regulex「无箭头、以颜色 + 虚线区分贪懒」的做法：
+ * - 回环：贪婪 maroon 实线 / 非贪婪 brown 虚线；
+ * - 旁路（min=0）：#333 实线 / 非贪婪 darkgreen 虚线；
+ * - 主干与交替分歧：近黑 #333（深色主题提亮）。
+ * 深色主题用同族但更亮的等价色，保证在深底上仍是「轨道」而非隐入背景。
  */
-function uniformLines(color: string): Readonly<Record<LineKind, LinePaint>> {
+function lines(
+  trunk: string,
+  greedyLoop: string,
+  lazyLoop: string,
+  bypassLazy: string
+): Readonly<Record<LineKind, LinePaint>> {
   return Object.freeze({
-    trunk: line(color),
-    choice: line(color),
-    loop: line(color),
-    loopLazy: line(color),
-    bypass: line(color),
-    bypassLazy: line(color)
+    trunk: line(trunk),
+    choice: line(trunk),
+    loop: line(greedyLoop),
+    loopLazy: line(lazyLoop, [4, 4]),
+    bypass: line(trunk),
+    bypassLazy: line(bypassLazy, [4, 4])
   });
 }
 
@@ -77,7 +82,7 @@ export const LIGHT: ThemePalette = Object.freeze({
     tagQuantifier: box('#00000000', '#00000000', '#b8860b'),
     tagGroupPrefix: box('#00000000', '#00000000', '#1c63b5')
   }),
-  line: uniformLines(LINE_COLOR_LIGHT)
+  line: lines('#333333', '#800000', '#a52a2a', '#006400')
 });
 
 export const DARK: ThemePalette = Object.freeze({
@@ -95,7 +100,7 @@ export const DARK: ThemePalette = Object.freeze({
     tagQuantifier: box('#00000000', '#00000000', '#ffd43b'),
     tagGroupPrefix: box('#00000000', '#00000000', '#74c0fc')
   }),
-  line: uniformLines(LINE_COLOR_DARK)
+  line: lines('#c9d1d9', '#e5534b', '#d3966f', '#6fbf73')
 });
 
 const registry = new Map<string, ThemePalette>();

@@ -10,9 +10,9 @@
  * 导出场景要留意：宿主页面的 CSS 不会跟着 `innerHTML` 走，所以 SVG 里**内联**了按 tone
  * 分配的颜色，同时保留 `class` 与 `data-*` 让宿主可选择性覆盖。
  */
-import type { Diagram, DiagramBox, DiagramPath, BoxTone } from './layout';
+import type { Diagram, DiagramBox, BoxTone, PathTone } from './layout';
 import { resolveTheme } from './theme';
-import type { SvgTheme } from './theme';
+import type { SvgTheme, LineKind } from './theme';
 
 export type { SvgTheme };
 
@@ -24,9 +24,6 @@ export interface PaintOptions {
 }
 
 const DEFAULT_FONT = "ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, monospace";
-
-/** 箭头三角形的边长（px）。 */
-const ARROW_SIZE = 6;
 
 function pt(v: readonly [number, number]): string {
   return `${round(v[0])} ${round(v[1])}`;
@@ -76,40 +73,16 @@ export function roundedPathD(points: readonly (readonly [number, number])[], rad
 }
 
 /**
- * path 的箭头落点与朝向角（弧度）。`'none'` 或点数不足返回 null。
- *
- * 朝向即流动方向：`'head'` 取末段方向、尖在末点；`'tail'` 取首段方向、尖在首点。
- * 回环用它区分贪婪性（head 落左端朝下接回入口 / tail 落右端朝上指离元素）。
+ * 连线语义 → 主题 `line` 档名。**对标 Regulex：不画箭头，以颜色 + 虚线区分贪懒。**
+ * - loop（回环）：贪婪取 `loop`、非贪婪取 `loopLazy`（虚线）；
+ * - bypass（min=0 旁路）：贪婪取 `bypass`、非贪婪取 `bypassLazy`（虚线）；
+ * - choice（交替分歧）：`choice`。
+ * SVG 与 Canvas 两栈共用此映射，保证取色/虚线口径一致、不漂移。
  */
-export function arrowHead(path: DiagramPath): { x: number; y: number; angle: number } | null {
-  if (path.arrow === 'none') return null;
-  const pts = path.points;
-  if (pts.length < 2) return null;
-  const last = pts[pts.length - 1] as readonly [number, number];
-  const secondLast = pts[pts.length - 2] as readonly [number, number];
-  const first = pts[0] as readonly [number, number];
-  const second = pts[1] as readonly [number, number];
-  const tip = path.arrow === 'head' ? last : first;
-  const from = path.arrow === 'head' ? secondLast : second;
-  const dx = tip[0] - from[0];
-  const dy = tip[1] - from[1];
-  if (dx === 0 && dy === 0) return null;
-  return { x: tip[0], y: tip[1], angle: Math.atan2(dy, dx) };
-}
-
-/** 以 (x,y) 为尖、沿 angle 方向展开的实心三角的 SVG `d`（与 arrowHead 共用同一朝向）。 */
-export function trianglePathD(x: number, y: number, angle: number, size = ARROW_SIZE): string {
-  const ux = Math.cos(angle);
-  const uy = Math.sin(angle);
-  const bx = x - ux * size;
-  const by = y - uy * size;
-  const px = -uy * (size / 2);
-  const py = ux * (size / 2);
-  return (
-    `M ${round(x)} ${round(y)} ` +
-    `L ${round(bx + px)} ${round(by + py)} ` +
-    `L ${round(bx - px)} ${round(by - py)} Z`
-  );
+export function lineKindOf(tone: PathTone, lazy: boolean): LineKind {
+  if (tone === 'loop') return lazy ? 'loopLazy' : 'loop';
+  if (tone === 'bypass') return lazy ? 'bypassLazy' : 'bypass';
+  return 'choice';
 }
 
 /** XML 文本转义。label 里必然出现 `<` `>` `&`（如 `(?<year>`），漏转义会直接产坏 XML。 */
@@ -165,26 +138,18 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
   }
   parts.push('</g>');
 
-  // 圆角折线（回环 / 旁路 / 分歧线）与实心三角箭头。箭头单独 fill 连线色、无描边。
-  parts.push('<g class="x-ac-regex-diagram__paths" stroke="' + edge + '" stroke-width="' + edgeWidth + '" fill="none">');
+  // 圆角折线（回环 / 旁路 / 分歧线）。**不画箭头**：每条线按 tone+lazy 取主题的
+  // stroke/width/dash，用颜色 + 实/虚区分贪懒（对标 Regulex）。
+  parts.push('<g class="x-ac-regex-diagram__paths" fill="none">');
   for (const p of diagram.paths) {
     const d = roundedPathD(p.points, p.radius);
-    // 非贪婪回环用虚线标识（对标 Regulex 以实线/虚线区分贪懒）；旁路与分歧线仍为实线。
-    const dash = p.tone === 'loop' && p.arrow === 'tail';
-    if (d !== '') {
-      parts.push(
-        `<path data-id="${escapeXml(p.id)}" data-tone="${p.tone}"` +
-          (dash ? ' stroke-dasharray="5 4"' : '') +
-          ` d="${d}"/>`
-      );
-    }
-    const head = arrowHead(p);
-    if (head !== null) {
-      parts.push(
-        `<path class="x-ac-regex-diagram__arrow" d="${trianglePathD(head.x, head.y, head.angle)}"` +
-          ` fill="${edge}" stroke="none"/>`
-      );
-    }
+    if (d === '') continue;
+    const lp = theme.line[lineKindOf(p.tone, p.lazy)];
+    const dashAttr = lp.dash === null ? '' : ` stroke-dasharray="${lp.dash.join(' ')}"`;
+    parts.push(
+      `<path data-id="${escapeXml(p.id)}" data-tone="${p.tone}"${p.lazy ? ' data-lazy="true"' : ''}` +
+        ` stroke="${lp.stroke}" stroke-width="${lp.width}"${dashAttr} d="${d}"/>`
+    );
   }
   parts.push('</g>');
 
@@ -239,9 +204,9 @@ export type CanvasOp =
       readonly kind: 'path';
       readonly points: readonly (readonly [number, number])[];
       readonly radius: number;
-      readonly dash: boolean;
+      /** 虚线段长数组；`null` 为实线。宿主应据此 setLineDash。 */
+      readonly dash: readonly number[] | null;
     }
-  | { readonly kind: 'triangle'; readonly x: number; readonly y: number; readonly angle: number }
   | { readonly kind: 'stroke' };
 
 /**
@@ -263,19 +228,17 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
   }
   ops.push({ kind: 'stroke' });
 
-  // 每条 path 单独成一条 beginPath…stroke（多条回环不能连成一团）。箭头是实心三角，单独 fill。
+  // 每条 path 单独成一条 beginPath…stroke（多条回环不能连成一团）。按 tone+lazy 取主题
+  // 线色/线宽/虚线；**不画箭头**（对标 Regulex 用颜色 + 实虚区分贪懒）。
   for (const p of diagram.paths) {
+    const lp = theme.line[lineKindOf(p.tone, p.lazy)];
     ops.push(
-      { kind: 'setLineWidth', value: edgeWidth },
-      { kind: 'setStroke', value: edge },
+      { kind: 'setLineWidth', value: lp.width },
+      { kind: 'setStroke', value: lp.stroke },
       { kind: 'beginPath' },
-      { kind: 'path', points: p.points, radius: p.radius, dash: p.tone === 'loop' && p.arrow === 'tail' },
+      { kind: 'path', points: p.points, radius: p.radius, dash: lp.dash },
       { kind: 'stroke' }
     );
-    const head = arrowHead(p);
-    if (head !== null) {
-      ops.push({ kind: 'setFill', value: edge }, { kind: 'triangle', x: head.x, y: head.y, angle: head.angle });
-    }
   }
 
   ops.push(
@@ -324,10 +287,8 @@ export interface PaintContext {
   moveTo(x: number, y: number): void;
   lineTo(x: number, y: number): void;
   /** 画一条圆角折线（宿主用 arcTo / quadraticCurveTo 落地，radius 为内拐点倒圆半径；
-   *  dash=true 时宿主应 setLineDash 画虚线，用于非贪婪回环）。 */
-  path(points: readonly (readonly [number, number])[], radius: number, dash: boolean): void;
-  /** 画一个实心三角（以 (x,y) 为尖、angle 为朝向，用于回环箭头）。 */
-  triangle(x: number, y: number, angle: number): void;
+   *  dash 为虚线段长数组，非 null 时宿主应 setLineDash 画虚线，用于非贪婪回环/旁路）。 */
+  path(points: readonly (readonly [number, number])[], radius: number, dash: readonly number[] | null): void;
   stroke(): void;
 }
 
@@ -366,9 +327,6 @@ export function applyCanvasOps(ops: readonly CanvasOp[], ctx: PaintContext): voi
         break;
       case 'path':
         ctx.path(op.points, op.radius, op.dash);
-        break;
-      case 'triangle':
-        ctx.triangle(op.x, op.y, op.angle);
         break;
       case 'stroke':
         ctx.stroke();

@@ -56,8 +56,8 @@ export interface DiagramEdge {
 
 /**
  * 连线的语义色调。**留扩展位**而非枚举死：未来"匹配步骤"视图会给同一批 path
- * 上"已匹配 / 回溯中 / 失败"三色（见仓 AGENTS.md 架构约束）。当前 SVG/Canvas 都用
- * 统一连线色渲染，tone 只随几何数据带出、暂不参与取色。
+ * 上"已匹配 / 回溯中 / 失败"三色（见仓 AGENTS.md 架构约束）。当前 SVG/Canvas 按 tone
+ * + `lazy` 从主题取线色与虚线（对标 Regulex 以颜色 + 虚线区分贪懒，无箭头）。
  */
 export type PathTone = 'loop' | 'bypass' | 'choice';
 
@@ -65,8 +65,9 @@ export type PathTone = 'loop' | 'bypass' | 'choice';
  * 一段**可圆角的折线路径**（回环 / min=0 旁路 / 交替分歧线）。
  *
  * 与 `DiagramEdge`（两点直线）的区别：一条 path 是 ≥2 个拐点组成的折线，painter 在
- * 每个内拐点按 `radius` 用二次贝塞尔倒圆，观感对标 Regulex 的圆角连线。箭头由 `arrow`
- * 表达（不再是两笔撇 chevron），落点与朝向由首/末段切线自动算，SVG 与 Canvas 共用同一几何。
+ * 每个内拐点按 `radius` 用二次贝塞尔倒圆，观感对标 Regulex 的圆角连线。**贪婪性由
+ * `lazy` 表达**（对齐 Regulex：实线=贪婪、虚线=非贪婪，且非贪婪回环/旁路另取一色），
+ * 不再画箭头。SVG 与 Canvas 共用同一几何与同一 `radius`。
  */
 export interface DiagramPath {
   readonly id: string;
@@ -74,8 +75,8 @@ export interface DiagramPath {
   readonly points: readonly (readonly [number, number])[];
   /** 内拐点倒圆半径（px）。相邻段太短时 painter 会 clamp，不会自交。 */
   readonly radius: number;
-  /** 'head' 箭头在末点、沿末段方向；'tail' 箭头在首点、沿首段方向；'none' 无箭头。 */
-  readonly arrow: 'none' | 'head' | 'tail';
+  /** 非贪婪（lazy）标记：仅对 loop/bypass 有意义；choice 恒 false。 */
+  readonly lazy: boolean;
   readonly tone: PathTone;
   readonly source?: SourceRange;
 }
@@ -122,9 +123,9 @@ export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
   tagFontSize: 11
 });
 
-/** 回环 / 旁路折线的内拐点倒圆半径（px）。对标 Regulex 的大圆角观感：roundedPathD 会按相邻段长
- *  再 clamp，故这里给足大值即得尽量圆润的拱角，段短处自动收窄、不会自交。 */
-const RAIL_RADIUS = 12;
+/** 回环 / 旁路折线的内拐点倒圆半径（px）。**实测自 Regulex 可视化源码**：其圆角偏移量
+ *  x=10，故取 10 精确对标；roundedPathD 仍会按相邻段长再 clamp，段短处收窄、不会自交。 */
+const RAIL_RADIUS = 10;
 
 interface Ctx {
   readonly m: DiagramMetrics;
@@ -288,9 +289,8 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const slotWidth = inner.width + inset * 2;
 
       // 回环：一条折线包住被包元素，四个直角拐点交由 painter 倒圆。点序固定
-      // [右框顶 → 右上 → 左上 → 左框顶]，于是 'head' 落在左端（朝下接回入口）、
-      // 'tail' 落在右端（朝上指离元素）—— 与原「greedy 箭头在左 / lazy 在右」的不变量一致。
-      // 箭头由 arrow 表达，不再画 chevron 两笔撇。
+      // [右框顶 → 右上 → 左上 → 左框顶]。**贪婪性用 lazy 表达**（对标 Regulex：实线 vs 虚线），
+      // 不再画箭头。
       paths.push({
         id: `${idPath}.r`,
         points: [
@@ -300,7 +300,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
           [left, frameTop]
         ],
         radius: RAIL_RADIUS,
-        arrow: greedy ? 'head' : 'tail',
+        lazy: !greedy,
         tone: 'loop',
         source: { start: node.start, end: node.end }
       });
@@ -332,7 +332,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
         // min === 0 的「可以整段跳过」走下方旁路，不与回环抢上方空间；起落点同样用框底。
         const skipDepth = inner.below + 4 + arcH;
         const sy = inner.height + skipDepth;
-        // 旁路：左框底 → 下 → 右 → 上回右框底；箭头在末点表示「整段跳过」的流向。
+        // 旁路：左框底 → 下 → 右 → 上回右框底；同样以 lazy（虚线/非贪婪）表达，不画箭头。
         paths.push({
           id: `${idPath}.s`,
           points: [
@@ -342,7 +342,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
             [right, frameBottom]
           ],
           radius: RAIL_RADIUS,
-          arrow: 'head',
+          lazy: !greedy,
           tone: 'bypass',
           source: { start: node.start, end: node.end }
         });
@@ -525,6 +525,7 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
     const midY = mids[i] ?? spineY;
     // 分歧线：从入口中线 (0, spineY) 斜插到分支中线 (gapX, midY)。两点即直线段（无拐点
     // 不产生圆角），归入 paths 体系，与回环/旁路共用同一套渲染。汇聚线同理镜像。
+    // choice 无贪婪性语义，lazy 恒 false。
     paths.push({
       id: `${idPath}.in${i}`,
       points: [
@@ -532,7 +533,7 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
         [m.gapX, midY]
       ],
       radius: 0,
-      arrow: 'none',
+      lazy: false,
       tone: 'choice'
     });
     paths.push({
@@ -542,7 +543,7 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
         [rightEdge, spineY]
       ],
       radius: 0,
-      arrow: 'none',
+      lazy: false,
       tone: 'choice'
     });
   });

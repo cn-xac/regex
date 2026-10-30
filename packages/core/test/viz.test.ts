@@ -5,7 +5,7 @@ import type { AstNode } from '../src/parser';
 import { DEFAULT_METRICS, layoutRailroad } from '../src/layout';
 import type { BoxTone, Diagram, DiagramBox, DiagramPath } from '../src/layout';
 import type { Locale } from '../src/i18n';
-import { applyCanvasOps, arrowHead, escapeXml, renderCanvasOps, renderSvg, roundedPathD, trianglePathD } from '../src/painter';
+import { applyCanvasOps, escapeXml, lineKindOf, renderCanvasOps, renderSvg, roundedPathD } from '../src/painter';
 import type { CanvasOp, PaintContext } from '../src/painter';
 
 const PATTERNS: readonly string[] = [
@@ -55,21 +55,7 @@ function boxesOf(pattern: string, locale: Locale = 'zh-CN'): readonly DiagramBox
   return layoutRailroad(astFor(pattern), { locale }).boxes;
 }
 
-/** 回环箭头的尖点坐标（head 在末点、tail 在首点），供贪懒方向断言。 */
-function arrowTip(p: DiagramPath): readonly [number, number] {
-  if (p.arrow === 'head') {
-    const last = p.points[p.points.length - 1];
-    if (last === undefined) throw new Error('head 箭头需要至少一个点');
-    return last;
-  }
-  if (p.arrow === 'tail') {
-    const first = p.points[0];
-    if (first === undefined) throw new Error('tail 箭头需要至少一个点');
-    return first;
-  }
-  throw new Error('该路径无箭头');
-}
-
+/** 回环 / 旁路的贪懒性由 `lazy` 布尔表达（对标 Regulex：实线 vs 虚线，不再画箭头）。 */
 const loopOf = (d: Diagram): DiagramPath | undefined => d.paths.find((p) => p.tone === 'loop');
 const bypassesOf = (d: Diagram): readonly DiagramPath[] => d.paths.filter((p) => p.tone === 'bypass');
 const choiceOf = (d: Diagram): readonly DiagramPath[] => d.paths.filter((p) => p.tone === 'choice');
@@ -201,8 +187,8 @@ describe('layout 不变量', () => {
     expect(tags('(?:a)(?=b)(?<=c)(?!d)')).toEqual(['(?:', '(?=', '(?<=', '(?!']);
   });
 
-  /** 使用者反馈 3 的另一半：次数与贪婪性由回环箭头表达，不摆一行文字在屁股后面。 */
-  it('次数与贪婪性走回环箭头：弧包住主体、次数写在弧上、箭头朝向区分贪懒', () => {
+  /** 使用者反馈 3 的另一半：次数与贪婪性由回环表达，不摆一行文字在屁股后面。 */
+  it('次数与回环：弧包住主体、次数写在弧上、贪婪性由 lazy（实/虚线）区分', () => {
     const plus = diagramFor('a+');
     const body = plus.boxes.find((b) => b.label === 'a');
     const tag = plus.boxes.find((b) => b.tone === 'tagQuantifier');
@@ -217,12 +203,16 @@ describe('layout 不变量', () => {
     expect(loop.points.every((pt) => pt[1] <= body.y + 1)).toBe(true);
     expect(Math.min(...loop.points.map((pt) => pt[0]))).toBeLessThanOrEqual(body.x + 1);
     expect(Math.max(...loop.points.map((pt) => pt[0]))).toBeGreaterThanOrEqual(body.x + body.w - 1);
-    // 箭头朝向区分贪婪性：greedy 尖落在左端、lazy 尖落在右端
+    // 贪婪性由 lazy 表达（对标 Regulex：无箭头，靠实线 vs 虚线区分）：贪婪 false、非贪婪 true。
     const lazy = loopOf(diagramFor('a+?'));
     if (lazy === undefined) throw new Error('缺非贪婪回环路径');
-    expect(loop.arrow).toBe('head');
-    expect(lazy.arrow).toBe('tail');
-    expect(arrowTip(loop)[0]).toBeLessThan(arrowTip(lazy)[0]);
+    expect(loop.lazy).toBe(false);
+    expect(lazy.lazy).toBe(true);
+    // 内拐点倒圆半径对标 Regulex 可视化源码实测值（圆角偏移 x=10）。
+    expect(loop.radius).toBe(10);
+    // 两栈线档映射：贪婪回环走 loop 实线、非贪婪走 loopLazy 虚线（painter 单测另覆盖取色）。
+    expect(lineKindOf(loop.tone, loop.lazy)).toBe('loop');
+    expect(lineKindOf(lazy.tone, lazy.lazy)).toBe('loopLazy');
     // 文案仍按说话法
     expect(tag.escaped).toBe('+');
     const labelOf = (p: string) => diagramFor(p).boxes.find((b) => b.tone === 'tagQuantifier')?.label;
@@ -241,9 +231,10 @@ describe('layout 不变量', () => {
     expect(bypass).toHaveLength(1);
     if (body === undefined) throw new Error('缺主体');
     const path = bypass[0] as DiagramPath;
-    // 旁路的水平段落在主体下方，且带箭头（表示「跳过」的流向）
+    // 旁路的水平段落在主体下方；`a*` 是贪婪量词，旁路 lazy=false（实线）。
     expect(Math.max(...path.points.map((pt) => pt[1]))).toBeGreaterThan(body.y + body.h - 1);
-    expect(path.arrow).toBe('head');
+    expect(path.lazy).toBe(false);
+    expect(path.radius).toBe(10);
     // `+` 的 min 是 1，不该有旁路
     expect(bypassesOf(diagramFor('a+'))).toHaveLength(0);
   });
@@ -310,9 +301,9 @@ describe('layout 不变量', () => {
     expect(
       arcs.every((p) => p.points.every(([x]) => x <= group.x + 0.01 || x >= group.x + group.w - 0.01))
     ).toBe(true);
-    // 旁路弧仍带箭头：a* 的旁路 arrow='head'，a+ 无旁路
+    // 旁路 lazy 标注：a* 旁路 lazy=false（贪婪），a+ 无旁路
     const starBypass = bypassesOf(diagramFor('a*'))[0];
-    expect(starBypass?.arrow).toBe('head');
+    expect(starBypass?.lazy).toBe(false);
     expect(bypassesOf(diagramFor('a+'))).toHaveLength(0);
   });
 
@@ -451,7 +442,6 @@ describe('Canvas painter', () => {
     'moveTo',
     'lineTo',
     'path',
-    'triangle',
     'stroke'
   ];
 
@@ -490,13 +480,12 @@ describe('Canvas painter', () => {
       moveTo: () => calls.push('moveTo'),
       lineTo: () => calls.push('lineTo'),
       path: () => calls.push('path'),
-      triangle: () => calls.push('triangle'),
       stroke: () => calls.push('stroke')
     };
     const ops = renderCanvasOps(d);
     applyCanvasOps(ops, ctx);
     // setStroke / setFill / setLineWidth / setFont 只做属性赋值，不产生方法调用
-    const DRAW: readonly string[] = ['strokeRect', 'fillText', 'beginPath', 'moveTo', 'lineTo', 'path', 'triangle', 'stroke'];
+    const DRAW: readonly string[] = ['strokeRect', 'fillText', 'beginPath', 'moveTo', 'lineTo', 'path', 'stroke'];
     expect(calls).toHaveLength(ops.filter((o) => DRAW.includes(o.kind)).length);
     const expected = d.boxes.filter((b) => b.label !== '').map((b) => b.label);
     expect(labels.sort()).toEqual([...expected].sort());
@@ -516,7 +505,7 @@ describe('Canvas painter', () => {
   });
 });
 
-describe('圆角几何（roundedPathD / 箭头）', () => {
+describe('圆角几何（roundedPathD / 线档映射）', () => {
   it('点数退化：0 点空串、1 点 M、2 点 M L 且无 Q', () => {
     expect(roundedPathD([], 4)).toBe('');
     expect(roundedPathD([[1, 2]], 4)).toBe('M 1 2');
@@ -544,38 +533,31 @@ describe('圆角几何（roundedPathD / 箭头）', () => {
     expect(roundedPathD([[0, 0], [10, 0], [20, 0]], 5)).toBe('M 0 0 L 10 0 L 20 0');
   });
 
-  it('arrowHead 按 arrow 取尖点：head 末点 / tail 首点 / none 空', () => {
-    const base: DiagramPath = {
-      id: 'p',
-      points: [[0, 0], [10, 0], [10, 10]],
-      radius: 0,
-      arrow: 'none',
-      tone: 'loop'
-    };
-    expect(arrowHead(base)).toBeNull();
-    expect(arrowHead({ ...base, arrow: 'head' })).toEqual({ x: 10, y: 10, angle: Math.PI / 2 });
-    const tail = arrowHead({ ...base, arrow: 'tail' });
-    expect(tail?.x).toBe(0);
-    expect(tail?.y).toBe(0);
+  it('lineKindOf 按 tone+lazy 选档：loop/loopLazy/bypass/bypassLazy/choice', () => {
+    expect(lineKindOf('loop', false)).toBe('loop');
+    expect(lineKindOf('loop', true)).toBe('loopLazy');
+    expect(lineKindOf('bypass', false)).toBe('bypass');
+    expect(lineKindOf('bypass', true)).toBe('bypassLazy');
+    expect(lineKindOf('choice', false)).toBe('choice');
   });
 
-  it('trianglePathD 生成闭合三角，尖点落在给定坐标', () => {
-    const d = trianglePathD(10, 10, 0);
-    expect(d.startsWith('M 10 10')).toBe(true);
-    expect(d).toMatch(/^M .+ L .+ L .+ Z$/);
+  it('SVG 回环渲染成圆角 path，贪婪实线、非贪婪虚线，且无箭头三角', () => {
+    const greedy = renderSvg(diagramFor('a+'));
+    expect(greedy).toContain('data-tone="loop"');
+    expect(greedy).toMatch(/data-tone="loop"[^>]*d="[^"]*Q/); // 内拐点用二次贝塞尔倒圆
+    expect(greedy).not.toContain('x-ac-regex-diagram__arrow'); // 箭头已彻底移除
+    const lazy = renderSvg(diagramFor('a+?'));
+    // 非贪婪回环带 stroke-dasharray（对标 Regulex 以实/虚线区分贪懒）
+    expect(lazy).toMatch(/data-tone="loop"[^>]*stroke-dasharray="[^"]+"/);
   });
 
-  it('SVG 回环渲染成圆角 path 且带实心三角箭头', () => {
-    const svg = renderSvg(diagramFor('a+'));
-    expect(svg).toContain('data-tone="loop"');
-    expect(svg).toContain('class="x-ac-regex-diagram__arrow"');
-    expect(svg).toMatch(/data-tone="loop"[^>]*d="[^"]*Q/);
-  });
-
-  it('Canvas 输出 path / triangle 指令', () => {
-    const ops = renderCanvasOps(diagramFor('a+'));
-    expect(ops.some((o) => o.kind === 'path')).toBe(true);
-    expect(ops.some((o) => o.kind === 'triangle')).toBe(true);
+  it('Canvas 输出 path 指令：贪婪 dash=null、非贪婪带虚线，无 triangle', () => {
+    const greedy = renderCanvasOps(diagramFor('a+'));
+    expect(greedy.some((o) => o.kind === 'path')).toBe(true);
+    expect(greedy.some((o) => o.kind === 'triangle')).toBe(false);
+    const lazy = renderCanvasOps(diagramFor('a+?'));
+    const lazyDash = lazy.find((o) => o.kind === 'path' && o.dash !== null);
+    expect(lazyDash?.kind).toBe('path');
   });
 });
 

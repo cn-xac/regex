@@ -129,6 +129,16 @@ export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
   tagFontSize: 10
 });
 
+/**
+ * 回环 / 旁路的腿**汇入贯穿主轨**处，沿 railY 向**槽内**伸出的水平「脚」长度（px）。
+ * 有了这段与主轨同向的短水平段，落轨点从「垂直腿直戳水平轨的硬直角」变成
+ * roundedPathD 会倒圆的**内拐点** → 腿以圆弧平滑汇入主轨（观感如匝道接主线）。
+ * 向槽内伸（而非外伸）：外伸会戳出外层组框、并在相邻量化元素的 gap 里互相重叠。
+ * 腿仍经过槽缘顶点 (0 / slotWidth, railY)，与相邻连接短线在同一 y 相接 → 连通不变。
+ * 取 RAIL_RADIUS 的 1.6 倍，使拐角不被 clamp 到半段而退化、弧够圆润；槽宽恒 ≥42，脚不越界。
+ */
+const RAIL_FOOT = 16;
+
 /** 回环 / 旁路折线的内拐点倒圆半径（px）。**实测自 Regulex 可视化源码**：其圆角偏移量
  *  x=10，故取 10 精确对标；roundedPathD 仍会按相邻段长再 clamp，段短处收窄、不会自交。 */
 const RAIL_RADIUS = 10;
@@ -326,15 +336,17 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const boxes: DiagramBox[] = [...shift(inner.boxes, inset, 0)];
       const paths: DiagramPath[] = [...shiftPaths(inner.paths, inset, 0)];
 
-      // 回环：从槽左缘 (0, railY) 起 → 上 → 跨过盒子 → 下回槽右缘 (slotWidth, railY)。
-      // 四个直角拐点交 painter 倒圆。贪婪性用 lazy 表达（对标 Regulex：实线 vs 虚线），不画箭头。
+      // 回环：两端各沿 railY 向槽内伸出「脚」→ 内拐点 (0,railY)/(slotWidth,railY) 被倒圆 →
+      // 腿以圆弧汇入贯穿主轨。首/末点是脚，腿仍经过槽缘顶点，与相邻连接短线同 y 相接、连通。
       paths.push({
         id: `${idPath}.r`,
         points: [
+          [RAIL_FOOT, railY],
           [0, railY],
           [0, topY],
           [slotWidth, topY],
-          [slotWidth, railY]
+          [slotWidth, railY],
+          [slotWidth - RAIL_FOOT, railY]
         ],
         radius: RAIL_RADIUS,
         lazy: !greedy,
@@ -369,13 +381,17 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
         // min === 0 的「可整段跳过」走下方旁路，从槽左缘 (0, railY) 起、下探、回到槽右缘 (slotWidth, railY)。
         const skipDepth = inner.below + 4 + arcH;
         const sy = inner.height + skipDepth;
+        // 旁路（min=0，可整段跳过）：与回环对称 —— 两端沿 railY 向槽内伸脚，腿在下方也
+        // 以圆弧汇入贯穿主轨，而非垂直直戳。
         paths.push({
           id: `${idPath}.s`,
           points: [
+            [RAIL_FOOT, railY],
             [0, railY],
             [0, sy],
             [slotWidth, sy],
-            [slotWidth, railY]
+            [slotWidth, railY],
+            [slotWidth - RAIL_FOOT, railY]
           ],
           radius: RAIL_RADIUS,
           lazy: !greedy,

@@ -275,14 +275,18 @@ describe('layout 不变量', () => {
     if (container === undefined || loop === undefined) throw new Error('缺组框或回环路径');
     if (prefix === undefined || qLabel === undefined) throw new Error('缺组标签或次数标签');
     const pts = loop.points;
-    // **中心线（贯穿主轨）模型**：回环两腿同高、都落在 railY 上，弧顶高于组框顶，
-    // 于是回环与贯穿主轨在同一 y 相接 → 连通（不再是"从组框顶边起落"的旧画法）。
-    expect(pts[0]?.[1]).toBe(pts[3]?.[1]);
-    expect(pts[0]?.[1]).toBe(d.railY);
+    // **中心线（贯穿主轨）模型 + 圆弧汇入脚**：回环两腿落在 railY 上，弧顶高于组框顶，
+    // 于是与贯穿主轨在同一 y 相接 → 连通。railY 上的顶点含「腿」(极值) 与内侧「脚」。
+    const railPts = pts.filter((p) => p[1] === d.railY);
+    const legL = Math.min(...railPts.map((p) => p[0]));
+    const legR = Math.max(...railPts.map((p) => p[0]));
     expect(Math.min(...pts.map((p) => p[1]))).toBeLessThan(container.y); // 弧顶高于组框顶
-    // 两腿在组框外缘之外（横向跨过整框，不与框边重合）。pts[0]=左腿、pts[3]=右腿。
-    expect(pts[3]?.[0]).toBeGreaterThan(container.x + container.w - 0.01);
-    expect(pts[0]?.[0]).toBeLessThan(container.x + 0.01);
+    // 两腿在组框外缘之外（量化整组时回环横向跨过整框）。
+    expect(legR).toBeGreaterThan(container.x + container.w - 0.01);
+    expect(legL).toBeLessThan(container.x + 0.01);
+    // 接触圆弧：每条腿内侧都存在落在 railY 上的「脚」顶点（硬直角 → 汇入弧的证据）。
+    const innerFeet = railPts.filter((p) => p[0] > legL + 0.01 && p[0] < legR - 0.01);
+    expect(innerFeet.length).toBeGreaterThanOrEqual(2);
     // 层位：次数标签（弧上）→ 组标签 → 组框顶，不重叠
     expect(qLabel.y + qLabel.h).toBeLessThanOrEqual(prefix.y);
     expect(prefix.y).toBeGreaterThanOrEqual(container.y);
@@ -322,11 +326,17 @@ describe('layout 不变量', () => {
     const c = d.boxes.find((b) => b.label === 'c');
     if (group === undefined || c === undefined) throw new Error('缺组框或 c');
     expect(c.x - (group.x + group.w)).toBeLessThanOrEqual(DEFAULT_METRICS.gapX + 12);
-    // 回环向外让开，不得压在组框边线上（否则像叠了第二个框）
+    // 回环向外让开：竖直腿/弧（非 railY 上的顶点）必须跨在组框左右缘之外，不与框边重合
+    // （否则像叠了第二个框）。圆弧汇入的「脚」是 railY 上的水平段，不构成压竖直框边，豁免。
     const arcs = d.paths.filter((p) => p.tone === 'loop');
     expect(arcs.length).toBeGreaterThan(0);
     expect(
-      arcs.every((p) => p.points.every(([x]) => x <= group.x + 0.01 || x >= group.x + group.w - 0.01))
+      arcs.every(
+        (p) =>
+          p.points.every(
+            ([x, y]) => y === d.railY || x <= group.x + 0.01 || x >= group.x + group.w - 0.01
+          )
+      )
     ).toBe(true);
     // 旁路 lazy 标注：a* 旁路 lazy=false（贪婪），a+ 无旁路
     const starBypass = bypassesOf(diagramFor('a*'))[0];

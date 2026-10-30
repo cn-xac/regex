@@ -73,6 +73,12 @@ export type MessageKey =
   | 'group.notParticipated'
   | 'group.ordinal'
   | 'group.name'
+  // 铁路图上分组/断言前缀的**通俗短语**（区别于上面的术语名 group.*）
+  | 'prefix.nonCapturing'
+  | 'prefix.lookahead'
+  | 'prefix.negLookahead'
+  | 'prefix.lookbehind'
+  | 'prefix.negLookbehind'
   // issue code 的解释性文案
   | 'issue.invalidPattern'
   | 'issue.invalidFlag'
@@ -148,6 +154,11 @@ const ZH: Record<MessageKey, string> = {
   'group.notParticipated': '本次未参与匹配',
   'group.ordinal': '编号',
   'group.name': '名称',
+  'prefix.nonCapturing': '不捕获',
+  'prefix.lookahead': '后面跟着',
+  'prefix.negLookahead': '后面不跟',
+  'prefix.lookbehind': '前面是',
+  'prefix.negLookbehind': '前面不是',
   'issue.invalidPattern': '正则表达式语法错误',
   'issue.invalidFlag': '存在不支持的修饰符',
   'issue.conflictingFlags': 'u 与 v 修饰符互斥，不能同时使用',
@@ -222,6 +233,11 @@ const EN: Record<MessageKey, string> = {
   'group.notParticipated': 'Did not participate in this match',
   'group.ordinal': 'Index',
   'group.name': 'Name',
+  'prefix.nonCapturing': 'no capture',
+  'prefix.lookahead': 'followed by',
+  'prefix.negLookahead': 'not followed by',
+  'prefix.lookbehind': 'preceded by',
+  'prefix.negLookbehind': 'not preceded by',
   'issue.invalidPattern': 'Invalid regular expression syntax',
   'issue.invalidFlag': 'Unsupported flag',
   'issue.conflictingFlags': 'The u and v flags are mutually exclusive',

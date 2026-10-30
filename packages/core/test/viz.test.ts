@@ -212,14 +212,19 @@ describe('layout 不变量', () => {
     expect(anchors('^$').map((b) => b.label)).toEqual(['^', '$']);
   });
 
-  /** 使用者反馈 3：组框上方标 #N；非捕获与断言不标编号。 */
-  it('捕获组标 #N、命名组带名字，非捕获与断言不标编号', () => {
-    const tags = (p: string) =>
-      boxesOf(p).filter((b) => b.tone === 'tagGroupPrefix').map((b) => b.label);
-    expect(tags('(?<year>a)')).toEqual(['#1 year']);
-    expect(tags('(a)(b)')).toEqual(['#1', '#2']);
-    expect(tags('(?<x>a)(b)(c)')).toEqual(['#1 x', '#2', '#3']);
-    expect(tags('(?:a)(?=b)(?<=c)(?!d)')).toEqual(['(?:', '(?=', '(?<=', '(?!']);
+  /** 使用者反馈 3：组框上方标 #N；非捕获与断言用通俗中文短语，裸符号存 escaped 保可逆。 */
+  it('捕获组标 #N、命名组带名字，非捕获与断言出中文语义短语', () => {
+    const tags = (p: string, locale: Locale = 'zh-CN') =>
+      boxesOf(p, locale).filter((b) => b.tone === 'tagGroupPrefix');
+    expect(tags('(?<year>a)').map((b) => b.label)).toEqual(['#1 year']);
+    expect(tags('(a)(b)').map((b) => b.label)).toEqual(['#1', '#2']);
+    expect(tags('(?<x>a)(b)(c)').map((b) => b.label)).toEqual(['#1 x', '#2', '#3']);
+    const g = tags('(?:a)(?=b)(?<=c)(?!d)');
+    expect(g.map((b) => b.label)).toEqual(['不捕获', '后面跟着', '前面是', '后面不跟']);
+    // 裸符号仍可从 escaped 取回（悬停/反查用），语义标签不丢可逆信息
+    expect(g.map((b) => b.escaped)).toEqual(['(?:', '(?=', '(?<=', '(?!']);
+    // 英文走同一套短语（本地化，非硬编码中文）
+    expect(tags('(?=x)(?<!y)', 'en').map((b) => b.label)).toEqual(['followed by', 'not preceded by']);
   });
 
   /** 使用者反馈 3 的另一半：次数与贪婪性由回环表达，不摆一行文字在屁股后面。 */

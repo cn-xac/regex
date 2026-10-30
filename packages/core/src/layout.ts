@@ -14,7 +14,7 @@
  * 5. **内容与框之间留白，且主体在内容区垂直居中**；标签与量化后缀都不参与垂直分配，
  *    否则同一条序列里的元素会互相错位。
  */
-import { quantifierLabel, tokenLabel, boundaryLabel } from './i18n';
+import { quantifierLabel, tokenLabel, boundaryLabel, translate } from './i18n';
 import type { Locale } from './i18n';
 import type { AstNode } from './parser';
 import type { SourceRange } from './types';
@@ -226,26 +226,30 @@ function tagWidth(label: string, m: DiagramMetrics): number {
   return textUnits(label) * m.charWidth * (m.tagFontSize / m.fontSize);
 }
 
-/** 分组的框上标签：捕获组带 `#N`，非捕获与断言明确不带编号。 */
-function groupTag(node: AstNode): string {
+/**
+ * 分组的框上标签。**用通俗中文短语**（不捕获 / 后面跟着 / 前面是 …）而非裸符号，
+ * 因为 `(?:` `(?=` `(?<=` 对非专家含义隐晦；原始写法作为 `escaped` 交给视图存进
+ * `data-escaped`，保留可逆与悬停信息。捕获组 / 命名组仍用 `#N`（编号是关键信息）。
+ */
+function groupTag(node: AstNode, ctx: Ctx): { label: string; escaped: string } {
   const kind = node.group ?? 'capturing';
   switch (kind) {
     case 'capturing':
-      return `#${node.ordinal ?? 0}`;
+      return { label: `#${node.ordinal ?? 0}`, escaped: '(' };
     case 'named':
-      return `#${node.ordinal ?? 0} ${node.name ?? ''}`;
+      return { label: `#${node.ordinal ?? 0} ${node.name ?? ''}`, escaped: `(?<${node.name ?? ''}>` };
     case 'nonCapturing':
-      return '(?:';
+      return { label: translate(ctx.locale, 'prefix.nonCapturing'), escaped: '(?:' };
     case 'lookahead':
-      return '(?=';
+      return { label: translate(ctx.locale, 'prefix.lookahead'), escaped: '(?=' };
     case 'negativeLookahead':
-      return '(?!';
+      return { label: translate(ctx.locale, 'prefix.negLookahead'), escaped: '(?!' };
     case 'lookbehind':
-      return '(?<=';
+      return { label: translate(ctx.locale, 'prefix.lookbehind'), escaped: '(?<=' };
     case 'negativeLookbehind':
-      return '(?<!';
+      return { label: translate(ctx.locale, 'prefix.negLookbehind'), escaped: '(?<!' };
     default:
-      return '(';
+      return { label: '(', escaped: '(' };
   }
 }
 
@@ -424,7 +428,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const padX = ctx.m.padX + 6;
       const padY = ctx.m.padY;
       const tagH = ctx.m.lineHeight;
-      const tag = groupTag(node);
+      const { label: tag, escaped: tagSymbol } = groupTag(node, ctx);
       const tagW = tagWidth(tag, ctx.m) + 4;
       // 标签行叠在 inner.above 之上：组内的回环弧占了一层，`#N` 必须再高一层才不会压上去。
       const tagBase = inner.above + 4;
@@ -455,7 +459,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
             'tagGroupPrefix',
             depth,
             { start: node.start, end: node.end },
-            undefined,
+            tagSymbol,
             ctx.m.tagFontSize
           ),
           ...shift(inner.boxes, padX, 0)

@@ -101,8 +101,11 @@ export interface DiagramMetrics {
   readonly minWidth: number;
   /** 主体文字字号。 */
   readonly fontSize: number;
-  /** 标注文字字号（次数、组编号）。**小一号**是有意的：中文标签按主体字号会宽到把序列撑开。 */
+  /** 标注文字字号（次数）。**小一号**是有意的：中文标签按主体字号会宽到把序列撑开。 */
   readonly tagFontSize: number;
+  /** 组/断言前缀标签字号，比次数标签再小一档。前缀浮在框上方且英文较长（如 "not preceded by"），
+   *  小一号既减溢出又不喧宾夺主；与次数标签分离，各自可调。 */
+  readonly prefixFontSize: number;
 }
 
 export interface LayoutOptions {
@@ -135,7 +138,8 @@ export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
   gapY: 14,
   minWidth: 30,
   fontSize: 16,
-  tagFontSize: 10
+  tagFontSize: 10,
+  prefixFontSize: 9
 });
 
 /**
@@ -233,6 +237,11 @@ function leafWidth(label: string, m: DiagramMetrics): number {
 /** 标注文字的等效宽度：按 tagFontSize 与主体字号的比例折算（小一号 → 更窄）。 */
 function tagWidth(label: string, m: DiagramMetrics): number {
   return textUnits(label) * m.charWidth * (m.tagFontSize / m.fontSize);
+}
+
+/** 组/断言前缀标签的等效宽度：按 prefixFontSize 折算（比次数标签更小一档，减英文溢出）。 */
+function prefixWidth(label: string, m: DiagramMetrics): number {
+  return textUnits(label) * m.charWidth * (m.prefixFontSize / m.fontSize);
 }
 
 /**
@@ -446,13 +455,19 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const padX = ctx.m.padX + 6;
       const padY = ctx.m.padY;
       const tagH = ctx.m.lineHeight;
+      // 前缀标签与框之间留一道缝：标签浮在框**正上方**（脱离框体），英文长标签对称外溢也不违和。
+      const labelGap = 3;
       const { label: tag, escaped: tagSymbol } = groupTag(node, ctx);
-      const tagW = tagWidth(tag, ctx.m) + 4;
-      // 标签行叠在 inner.above 之上：组内的回环弧占了一层，`#N` 必须再高一层才不会压上去。
+      const tagW = prefixWidth(tag, ctx.m);
+      // 标签行叠在 inner.above 之上：组内的回环弧占了一层，标签必须再高一层才不会压上去。
       const tagBase = inner.above + 4;
-      const containerY = -(tagBase + tagH + padY);
-      const containerH = tagBase + tagH + padY + inner.height + padY + inner.below;
+      // 容器框上沿只包内容（tagBase + padY 在内容之上给内部回环留位），标签不再占框内一行。
+      const containerY = -(tagBase + padY);
+      const containerH = tagBase + padY + inner.height + padY + inner.below;
       const groupW = inner.width + padX * 2;
+      // 标签水平居中于整框（tagW 可能大于 groupW → 左右对称外溢，因在框上方故不违和）。
+      const labelX = (groupW - tagW) / 2;
+      const labelY = containerY - labelGap - tagH;
       const gRail = railEdge(`${idPath}.rl`, groupW, inner.railY);
       return {
         boxes: [
@@ -469,8 +484,8 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
           ),
           box(
             `${idPath}.p`,
-            padX,
-            containerY + padY / 2,
+            labelX,
+            labelY,
             tagW,
             tagH,
             tag,
@@ -478,7 +493,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
             depth,
             { start: node.start, end: node.end },
             tagSymbol,
-            ctx.m.tagFontSize
+            ctx.m.prefixFontSize
           ),
           ...shift(inner.boxes, padX, 0)
         ],
@@ -486,7 +501,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
         paths: shiftPaths(inner.paths, padX, 0),
         width: groupW,
         height: inner.height,
-        above: tagBase + tagH + padY,
+        above: tagBase + padY + labelGap + tagH,
         below: inner.below + padY,
         railY: inner.railY
       };

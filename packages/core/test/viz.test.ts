@@ -241,6 +241,27 @@ describe('layout 不变量', () => {
     expect(tone('(?<!a)')).toBe('assertion');
   });
 
+  /**
+   * 使用者反馈：前缀标签要「居中 + 移到框上方」，字号独立于次数标签。
+   * 钉死五种前缀在中英双语下：① 水平居中于框 ② 整块在框上沿之上 ③ 字号=prefixFontSize。
+   */
+  it('前缀标签居中于框、浮在框正上方、用独立小字号', () => {
+    const PREFIX = ['(?:a)', '(?=a)', '(?!a)', '(?<=a)', '(?<!a)'];
+    for (const locale of ['zh-CN', 'en'] as const) {
+      for (const p of PREFIX) {
+        const boxes = boxesOf(p, locale);
+        const c = boxes.find((b) => ['group', 'nonCapturing', 'assertion'].includes(b.tone));
+        const t = boxes.find((b) => b.tone === 'tagGroupPrefix');
+        if (c === undefined || t === undefined) throw new Error(`${locale} ${p} 缺框或标签`);
+        expect(t.x + t.w / 2, `${locale} ${p} 未居中`).toBeCloseTo(c.x + c.w / 2, 0);
+        expect(t.y + t.h, `${locale} ${p} 未在框上方`).toBeLessThanOrEqual(c.y);
+        expect(t.fontSize, `${locale} ${p} 前缀字号`).toBe(DEFAULT_METRICS.prefixFontSize);
+      }
+    }
+    // 前缀字号独立：比次数标签更小，两者互不影响
+    expect(DEFAULT_METRICS.prefixFontSize).toBeLessThan(DEFAULT_METRICS.tagFontSize);
+  });
+
   /** 使用者反馈 3 的另一半：次数与贪婪性由回环表达，不摆一行文字在屁股后面。 */
   it('次数与回环：弧包住主体、次数写在弧上、贪婪性由 lazy（实/虚线）区分', () => {
     const plus = diagramFor('a+');
@@ -317,9 +338,12 @@ describe('layout 不变量', () => {
     // 接触圆弧：每条腿内侧都存在落在 railY 上的「脚」顶点（硬直角 → 汇入弧的证据）。
     const innerFeet = railPts.filter((p) => p[0] > legL + 0.01 && p[0] < legR - 0.01);
     expect(innerFeet.length).toBeGreaterThanOrEqual(2);
-    // 层位：次数标签（弧上）→ 组标签 → 组框顶，不重叠
+    // 层位：次数标签（弧上）→ 组前缀标签 → 组框，三者自上而下不重叠。
     expect(qLabel.y + qLabel.h).toBeLessThanOrEqual(prefix.y);
-    expect(prefix.y).toBeGreaterThanOrEqual(container.y);
+    // 前缀标签已移到**框正上方**（用户反馈：居中 + 框外，英文长标签对称外溢不违和）。
+    expect(prefix.y + prefix.h).toBeLessThanOrEqual(container.y);
+    // 且水平居中于整框。
+    expect(prefix.x + prefix.w / 2).toBeCloseTo(container.x + container.w / 2, 0);
   });
 
   /** 反过来的嵌套：组内含量词时，弧必须留在框内，不能外溢。 */

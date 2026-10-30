@@ -194,6 +194,16 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
     }
     parts.push('</g>');
   }
+  // 首尾锚点圆点（轨道端口）：一条连续轨需要明确的进出端口，对标 Regulex 的 start / end 圆点。
+  if (diagram.anchors.length > 0) {
+    parts.push(`<g class="x-ac-regex-diagram__anchors" stroke="none" fill="${edge}">`);
+    for (const a of diagram.anchors) {
+      parts.push(
+        `<circle data-kind="${a.kind}" cx="${round(a.x)}" cy="${round(a.y)}" r="${round(a.r)}"/>`
+      );
+    }
+    parts.push('</g>');
+  }
   parts.push('</g></svg>');
 
   return parts.join('');
@@ -209,6 +219,7 @@ export type CanvasOp =
   | { readonly kind: 'setTextAlign'; readonly value: string }
   | { readonly kind: 'setLineDash'; readonly dash: readonly number[] | null }
   | { readonly kind: 'rect'; readonly x: number; readonly y: number; readonly w: number; readonly h: number; readonly radius: number }
+  | { readonly kind: 'circle'; readonly x: number; readonly y: number; readonly r: number }
   | { readonly kind: 'fillText'; readonly text: string; readonly x: number; readonly y: number }
   | { readonly kind: 'beginPath' }
   | { readonly kind: 'moveTo'; readonly x: number; readonly y: number }
@@ -298,6 +309,13 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
       });
     }
   }
+  // 首尾锚点圆点（轨道端口）。
+  if (diagram.anchors.length > 0) {
+    ops.push({ kind: 'setLineDash', dash: null }, { kind: 'setFill', value: edge });
+    for (const a of diagram.anchors) {
+      ops.push({ kind: 'circle', x: round(a.x), y: round(a.y), r: round(a.r) });
+    }
+  }
   return Object.freeze(ops);
 }
 
@@ -315,6 +333,8 @@ export interface PaintContext {
   textAlign: string;
   /** 定义一个圆角矩形路径（宿主内部先 beginPath，再 roundRect 或四角 arcTo；不自动填充/描边）。 */
   rect(x: number, y: number, w: number, h: number, radius: number): void;
+  /** 画一个实心圆点（以 (x,y) 为心、r 为半径，用当前 fillStyle）。用于首尾锚点。 */
+  circle(x: number, y: number, r: number): void;
   fillText(text: string, x: number, y: number): void;
   beginPath(): void;
   moveTo(x: number, y: number): void;
@@ -353,6 +373,9 @@ export function applyCanvasOps(ops: readonly CanvasOp[], ctx: PaintContext): voi
         break;
       case 'rect':
         ctx.rect(op.x, op.y, op.w, op.h, op.radius);
+        break;
+      case 'circle':
+        ctx.circle(op.x, op.y, op.r);
         break;
       case 'fill':
         ctx.fill();

@@ -108,6 +108,10 @@ export interface Diagram {
   readonly boxes: readonly DiagramBox[];
   readonly edges: readonly DiagramEdge[];
   readonly paths: readonly DiagramPath[];
+  /** 首尾锚点（rail 端口）。空图（无内容）为 `[]`。 */
+  readonly anchors: readonly DiagramAnchor[];
+  /** 贯穿主轨的中心线 y（最终坐标）。空图为 0。 */
+  readonly railY: number;
 }
 
 export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
@@ -129,6 +133,20 @@ export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
  *  x=10，故取 10 精确对标；roundedPathD 仍会按相邻段长再 clamp，段短处收窄、不会自交。 */
 const RAIL_RADIUS = 10;
 
+/** 首尾锚点圆点半径（px）。对标 Regulex 轨道端口圆点，取端口感知的 4.5。 */
+const ANCHOR_R = 4.5;
+
+/** 元素自带的贯穿主线段 [0 → width] @ railY；width≤0 返回 null（避免退化边）。 */
+function railEdge(id: string, width: number, railY: number): DiagramEdge | null {
+  return width > 0
+    ? Object.freeze({
+        id,
+        from: Object.freeze({ x: 0, y: railY }),
+        to: Object.freeze({ x: width, y: railY })
+      })
+    : null;
+}
+
 interface Ctx {
   readonly m: DiagramMetrics;
   readonly locale: Locale;
@@ -142,13 +160,37 @@ interface Placed {
   height: number;
   /** 主体**上方**已被标签/回环占用的高度，用于让嵌套的标注互相错开而不打架。 */
   above: number;
-  /** 主体**下方**已占用的高度（`min === 0` 的旁路弧走下面）。 */
+  /** 主体**下方**已占用的高度（`min === 0` 的旁路走下面）。 */
   below: number;
+  /**
+   * **贯穿主线（rail）所在的局部 y**（相对该元素包围盒内容原点 y=0）。这是修复
+   * 「元素之间不连通」的核心：所有连线都画在这条中心线上，盒子坐落在轨上，回环/旁路
+   * 也从这条线进出（而非顶/底边），相邻元素与首尾进出 stub 全部 y 一致 → 一条连续主干轨。
+   */
+  railY: number;
 }
 
-/** 只含主体盒、没有任何上方/下方标注的占位结果。 */
-function bare(boxes: DiagramBox[], edges: DiagramEdge[], width: number, height: number): Placed {
-  return { boxes, edges, paths: [], width, height, above: 0, below: 0 };
+/** 铁路图首尾锚点（对标 Regulex 的 start / end 圆点）：一条连续轨必须有明确进出端口。 */
+export interface DiagramAnchor {
+  readonly x: number;
+  readonly y: number;
+  readonly r: number;
+  readonly kind: 'start' | 'end';
+}
+
+/** 只含主体盒、没有任何上方/下方标注的占位结果（叶子 / 合并字面量）。自带贯穿主线段。 */
+function bare(id: string, boxes: DiagramBox[], edges: DiagramEdge[], width: number, height: number): Placed {
+  const rail = railEdge(`${id}.rl`, width, height / 2);
+  return {
+    boxes,
+    edges: rail === null ? edges : [...edges, rail],
+    paths: [],
+    width,
+    height,
+    above: 0,
+    below: 0,
+    railY: height / 2
+  };
 }
 
 /**
@@ -275,31 +317,24 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const arcH = m.lineHeight + 4;
       const base = inner.above + 4; // 回环水平段的上沿（从 inner.above 起叠，避免与组标签同层）
       const topY = -(base + arcH);
-      const boxes: DiagramBox[] = [...inner.boxes];
-      const paths: DiagramPath[] = [...inner.paths];
 
-      // 弧的起落点取**被包元素的外缘**，而不是主体内容的 0 线：量化一个分组时，组框
-      // 为了让出 `#N` 标签行而向上扩到负 y，只有从框顶起落才是「弧包框」；反过来组内
-      // 含量词时弧在框内、框在外 —— 谁包谁由嵌套关系自动决定，不需要特判。
-      const frameTop = -inner.above;
-      const frameBottom = inner.height + inner.below;
-      // 弧必须**向外让开**：left/right 若正好等于组框左右边，回环与旁路就会和框边重合，
-      // 看起来像框上又叠了一个框。
+      const railY = inner.railY; // 中心线 = 被包元素的主轨 y
+      // 被包内容整体右移 inset，使**回环/旁路的腿正好落在槽位左右缘 (0 / slotWidth) 的 railY 上**——
+      // 相邻序列短线的两端即落在这两个点上，于是上下带与贯穿主轨在同一 y 相接、天然连通。
       const inset = 6;
-      const left = -inset;
-      const right = inner.width + inset;
       const slotWidth = inner.width + inset * 2;
+      const boxes: DiagramBox[] = [...shift(inner.boxes, inset, 0)];
+      const paths: DiagramPath[] = [...shiftPaths(inner.paths, inset, 0)];
 
-      // 回环：一条折线包住被包元素，四个直角拐点交由 painter 倒圆。点序固定
-      // [右框顶 → 右上 → 左上 → 左框顶]。**贪婪性用 lazy 表达**（对标 Regulex：实线 vs 虚线），
-      // 不再画箭头。
+      // 回环：从槽左缘 (0, railY) 起 → 上 → 跨过盒子 → 下回槽右缘 (slotWidth, railY)。
+      // 四个直角拐点交 painter 倒圆。贪婪性用 lazy 表达（对标 Regulex：实线 vs 虚线），不画箭头。
       paths.push({
         id: `${idPath}.r`,
         points: [
-          [right, frameTop],
-          [right, topY],
-          [left, topY],
-          [left, frameTop]
+          [0, railY],
+          [0, topY],
+          [slotWidth, topY],
+          [slotWidth, railY]
         ],
         radius: RAIL_RADIUS,
         lazy: !greedy,
@@ -331,17 +366,16 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
 
       let below = inner.below;
       if (canSkip) {
-        // min === 0 的「可以整段跳过」走下方旁路，不与回环抢上方空间；起落点同样用框底。
+        // min === 0 的「可整段跳过」走下方旁路，从槽左缘 (0, railY) 起、下探、回到槽右缘 (slotWidth, railY)。
         const skipDepth = inner.below + 4 + arcH;
         const sy = inner.height + skipDepth;
-        // 旁路：左框底 → 下 → 右 → 上回右框底；同样以 lazy（虚线/非贪婪）表达，不画箭头。
         paths.push({
           id: `${idPath}.s`,
           points: [
-            [left, frameBottom],
-            [left, sy],
-            [right, sy],
-            [right, frameBottom]
+            [0, railY],
+            [0, sy],
+            [slotWidth, sy],
+            [slotWidth, railY]
           ],
           radius: RAIL_RADIUS,
           lazy: !greedy,
@@ -351,15 +385,17 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
         below = skipDepth;
       }
 
+      const qRail = railEdge(`${idPath}.rl`, slotWidth, railY);
       return {
         boxes,
-        edges: inner.edges,
+        edges: [...shiftEdges(inner.edges, inset, 0), ...(qRail ? [qRail] : [])],
         paths,
         // 占位宽只由被包元素 + 弧 inset 决定，**不含标签宽**（标签可溢出，见上注释）
         width: slotWidth,
         height: inner.height,
         above: base + arcH + (label === '' ? 0 : m.lineHeight),
-        below
+        below,
+        railY: inner.railY
       };
     }
     case 'group': {
@@ -374,13 +410,15 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const tagBase = inner.above + 4;
       const containerY = -(tagBase + tagH + padY);
       const containerH = tagBase + tagH + padY + inner.height + padY + inner.below;
+      const groupW = inner.width + padX * 2;
+      const gRail = railEdge(`${idPath}.rl`, groupW, inner.railY);
       return {
         boxes: [
           box(
             idPath,
             0,
             containerY,
-            inner.width + padX * 2,
+            groupW,
             containerH,
             '',
             isAssertion ? 'assertion' : 'group',
@@ -402,18 +440,20 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
           ),
           ...shift(inner.boxes, padX, 0)
         ],
-        edges: [...shiftEdges(inner.edges, padX, 0)],
+        edges: [...shiftEdges(inner.edges, padX, 0), ...(gRail ? [gRail] : [])],
         paths: shiftPaths(inner.paths, padX, 0),
-        width: inner.width + padX * 2,
+        width: groupW,
         height: inner.height,
         above: tagBase + tagH + padY,
-        below: inner.below + padY
+        below: inner.below + padY,
+        railY: inner.railY
       };
     }
     default: {
       const { label, tone, escaped } = leafLabel(node, ctx);
       const w = leafWidth(label, ctx.m);
       return bare(
+        idPath,
         [
           box(idPath, 0, 0, w, ctx.m.leafHeight, label, tone, depth, {
             start: node.start,
@@ -462,31 +502,33 @@ function placeSequence(node: AstNode, idPath: string, depth: number, ctx: Ctx): 
   const boxes: DiagramBox[] = [];
   const edges: DiagramEdge[] = [];
   const paths: DiagramPath[] = [];
-  // 必须先量完所有子项再居中：边推进边抬高 height 会让越靠右的盒子基准越高。
-  const height = placed.reduce((max, p) => Math.max(max, p.height), ctx.m.leafHeight);
+
+  // **贯穿主轨（Regulex 模型）**：所有子元素按各自 railY 对齐到同一中心线 Y0，
+  // 元素之间在 gap 处画水平短线、首尾各画进出 stub，连到最左/最右；每个元素都保证
+  // 自己的盒子/回环带/旁路带落在槽位左右缘的 railY 上 → 相邻短线与进出 stub 天然接得上，
+  // 修掉此前「线接不到盒子 / 单元素无进出」的断连。
+  const Y0 = placed.reduce((max, p) => Math.max(max, p.railY), 0);
   let x = 0;
   placed.forEach((p, i) => {
-    const offsetY = Math.round((height - p.height) / 2);
+    const offsetY = Y0 - p.railY; // ≥0：把该元素中心线抬到 Y0
     boxes.push(...shift(p.boxes, x, offsetY));
     edges.push(...shiftEdges(p.edges, x, offsetY));
     paths.push(...shiftPaths(p.paths, x, offsetY));
     if (i > 0) {
-      edges.push({
-        id: `${idPath}.c${i}`,
-        from: { x: x - ctx.m.gapX, y: height / 2 },
-        to: { x, y: offsetY + p.height / 2 }
-      });
+      // 相邻元素在 gap 处连一条中心线水平短线；两端正好落在各自槽缘（=盒子/回环带的进出点）。
+      edges.push({ id: `${idPath}.c${i}`, from: { x: x - ctx.m.gapX, y: Y0 }, to: { x, y: Y0 } });
     }
     x += p.width + ctx.m.gapX;
   });
-  const above = placed.reduce((max, p) => Math.max(max, p.above), 0);
-  const below = placed.reduce((max, p) => Math.max(max, p.below), 0);
-  return { boxes, edges, paths, width: Math.max(0, x - ctx.m.gapX), height, above, below };
+  const width = Math.max(0, x - ctx.m.gapX);
+  const height = placed.reduce((max, p) => Math.max(max, Y0 - p.railY + p.height), ctx.m.leafHeight);
+  return { boxes, edges, paths, width, height, above: Y0, below: height - Y0, railY: Y0 };
 }
 
 function placeRun(text: string, start: number, end: number, id: string, depth: number, ctx: Ctx): Placed {
   const w = leafWidth(text, ctx.m);
   return bare(
+    id,
     [box(id, 0, 0, w, ctx.m.leafHeight, text, 'text', depth, { start, end }, text)],
     [],
     w,
@@ -556,8 +598,9 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
     paths,
     width: rightEdge,
     height: Math.max(m.leafHeight, totalSlots),
-    above: 0, // 上方标注已内化进 slot，外层不必再扩
-    below: 0
+    above: 0, // 上方分支已内化进 slot，外层不必再扩
+    below: 0,
+    railY: spineY
   };
 }
 
@@ -624,19 +667,37 @@ export function layoutRailroad(ast: AstNode, options: LayoutOptions = {}): Diagr
     }
   }
   if (!Number.isFinite(minX)) {
-    minX = 0;
-    minY = 0;
-    maxX = m.minWidth;
-    maxY = m.leafHeight;
+    // 空图：无内容 → 无轨、无锚点。
+    return Object.freeze({
+      width: m.minWidth,
+      height: m.leafHeight,
+      boxes: Object.freeze([] as readonly DiagramBox[]),
+      edges: Object.freeze([] as readonly DiagramEdge[]),
+      paths: Object.freeze([] as readonly DiagramPath[]),
+      anchors: Object.freeze([] as readonly DiagramAnchor[]),
+      railY: 0
+    });
   }
   const pad = m.padX + m.padY;
+  const dx = m.padX - minX;
+  const dy = m.padY - minY;
+  const railYFinal = placed.railY + dy;
+
+  // 主轨由各元素自带的贯穿线（见 place 各分支）+ 序列 gap 连线拼成连续一条；这里只在两端
+  // 加首尾锚点圆点作为轨道端口（对标 Regulex 的 start / end 圆点），不在 choice 分叉处补直线。
+  const anchors: DiagramAnchor[] = [
+    Object.freeze({ x: minX + dx, y: railYFinal, r: ANCHOR_R, kind: 'start' as const }),
+    Object.freeze({ x: maxX + dx, y: railYFinal, r: ANCHOR_R, kind: 'end' as const })
+  ];
 
   return Object.freeze({
     width: Math.max(m.minWidth, maxX - minX + pad),
     height: Math.max(m.leafHeight, maxY - minY + pad),
     // shift/shiftEdges/shiftPaths 内已逐元素冻结，这里只冻结数组本身
-    boxes: Object.freeze(shift(placed.boxes, m.padX - minX, m.padY - minY)),
-    edges: Object.freeze(shiftEdges(placed.edges, m.padX - minX, m.padY - minY)),
-    paths: Object.freeze(shiftPaths(placed.paths, m.padX - minX, m.padY - minY))
+    boxes: Object.freeze(shift(placed.boxes, dx, dy)),
+    edges: Object.freeze(shiftEdges(placed.edges, dx, dy)),
+    paths: Object.freeze(shiftPaths(placed.paths, dx, dy)),
+    anchors: Object.freeze(anchors),
+    railY: railYFinal
   });
 }

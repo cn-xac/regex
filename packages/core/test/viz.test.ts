@@ -89,6 +89,14 @@ describe('layout 不变量', () => {
           expect(y).toBeLessThanOrEqual(d.height);
         }
       }
+      // 首尾锚点圆点整体（含半径）落在画布内；y 恒等于贯穿主轨 railY。
+      for (const a of d.anchors) {
+        expect(a.x - a.r).toBeGreaterThanOrEqual(0);
+        expect(a.x + a.r).toBeLessThanOrEqual(d.width);
+        expect(a.y - a.r).toBeGreaterThanOrEqual(0);
+        expect(a.y + a.r).toBeLessThanOrEqual(d.height);
+        expect(a.y).toBe(d.railY);
+      }
     }
   });
 
@@ -96,6 +104,22 @@ describe('layout 不变量', () => {
     for (const pattern of PATTERNS) {
       const ids = diagramFor(pattern).boxes.map((b) => b.id);
       expect(new Set(ids).size, `pattern=${pattern}`).toBe(ids.length);
+    }
+  });
+
+  it('主轨连通：所有连线为水平线段，首尾恰有两枚锚点端口落在 railY 上', () => {
+    for (const pattern of PATTERNS.filter((p) => p !== '')) {
+      const d = diagramFor(pattern);
+      expect(d.anchors, `pattern=${pattern}`).toHaveLength(2);
+      expect(d.anchors[0]?.kind).toBe('start');
+      expect(d.anchors[1]?.kind).toBe('end');
+      expect(d.anchors[0]?.y).toBe(d.railY);
+      expect(d.anchors[1]?.y).toBe(d.railY);
+      for (const e of d.edges) {
+        // 主干线一律水平（from.y===to.y）：贯穿主轨 + 相邻元素 gap 短线 + 各元素自带主线。
+        // （分支内部叶子主线落在各自分支中心线，非全局 railY，故只断言水平，不强求同一 y。）
+        expect(e.from.y, `pattern=${pattern} id=${e.id}`).toBe(e.to.y);
+      }
     }
   });
 
@@ -197,10 +221,12 @@ describe('layout 不变量', () => {
     // 次数标签落在主体上方的弧段附近，而不是右侧
     expect(tag.y + tag.h).toBeLessThanOrEqual(body.y + 1);
     expect(Math.abs(tag.x + tag.w / 2 - (body.x + body.w / 2))).toBeLessThan(body.w);
-    // 回环折线包住主体：所有顶点都在主体上方，横向跨过整个主体
+    // 回环折线跨过主体：顶部弧段在主体上方，两端的腿落在中心线（贯穿主轨）上、横向包住主体。
     const loop = loopOf(plus);
     if (loop === undefined) throw new Error('缺回环路径');
-    expect(loop.points.every((pt) => pt[1] <= body.y + 1)).toBe(true);
+    expect(Math.min(...loop.points.map((pt) => pt[1]))).toBeLessThan(body.y); // 弧顶高于盒顶
+    // 端点落在主体垂直中心线（railY）上，与贯穿主轨同一 y → 天然连通。
+    expect(Math.max(...loop.points.map((pt) => pt[1]))).toBeCloseTo(body.y + body.h / 2, 0);
     expect(Math.min(...loop.points.map((pt) => pt[0]))).toBeLessThanOrEqual(body.x + 1);
     expect(Math.max(...loop.points.map((pt) => pt[0]))).toBeGreaterThanOrEqual(body.x + body.w - 1);
     // 贪婪性由 lazy 表达（对标 Regulex：无箭头，靠实线 vs 虚线区分）：贪婪 false、非贪婪 true。
@@ -249,14 +275,15 @@ describe('layout 不变量', () => {
     if (container === undefined || loop === undefined) throw new Error('缺组框或回环路径');
     if (prefix === undefined || qLabel === undefined) throw new Error('缺组标签或次数标签');
     const pts = loop.points;
-    // 起落点（右上 / 左上）落在组框顶边，顶部两点更高
-    expect(pts[0]?.[1]).toBe(container.y);
-    expect(pts[3]?.[1]).toBe(container.y);
-    expect(pts[1]?.[1]).toBeLessThan(container.y);
-    // 竖直段在组框外缘之外（向外让开，不与框边重合）
-    expect(pts[0]?.[0]).toBeGreaterThan(container.x + container.w - 0.01);
-    expect(pts[3]?.[0]).toBeLessThan(container.x + 0.01);
-    // 层位：次数标签（弧上）→ 组框顶 → 组标签（框内顶部），三者不重叠
+    // **中心线（贯穿主轨）模型**：回环两腿同高、都落在 railY 上，弧顶高于组框顶，
+    // 于是回环与贯穿主轨在同一 y 相接 → 连通（不再是"从组框顶边起落"的旧画法）。
+    expect(pts[0]?.[1]).toBe(pts[3]?.[1]);
+    expect(pts[0]?.[1]).toBe(d.railY);
+    expect(Math.min(...pts.map((p) => p[1]))).toBeLessThan(container.y); // 弧顶高于组框顶
+    // 两腿在组框外缘之外（横向跨过整框，不与框边重合）。pts[0]=左腿、pts[3]=右腿。
+    expect(pts[3]?.[0]).toBeGreaterThan(container.x + container.w - 0.01);
+    expect(pts[0]?.[0]).toBeLessThan(container.x + 0.01);
+    // 层位：次数标签（弧上）→ 组标签 → 组框顶，不重叠
     expect(qLabel.y + qLabel.h).toBeLessThanOrEqual(prefix.y);
     expect(prefix.y).toBeGreaterThanOrEqual(container.y);
   });
@@ -368,8 +395,12 @@ describe('layout 不变量', () => {
     const nested = boxesOf('(?<x>a+)');
     const prefix = nested.find((b) => b.tone === 'tagGroupPrefix');
     const innerTag = nested.find((b) => b.tone === 'tagQuantifier');
-    if (prefix === undefined || innerTag === undefined) throw new Error('缺组标签或内层回环标签');
-    expect(prefix.y + prefix.h).toBeLessThanOrEqual(innerTag.y);
+    const innerBody = nested.find((b) => b.label === 'a');
+    if (prefix === undefined || innerTag === undefined || innerBody === undefined) throw new Error('缺组标签/内层标签/主体');
+    // 核心不变量「不压低主体基线」：组标签与内层次数标签都悬浮在主体上方，主体中心仍在 railY。
+    expect(prefix.y + prefix.h).toBeLessThanOrEqual(innerBody.y + 1);
+    expect(innerTag.y + innerTag.h).toBeLessThanOrEqual(innerBody.y + 1);
+    expect(innerBody.y + innerBody.h / 2).toBe(diagramFor('(?<x>a+)').railY);
   });
 
   it('量词与组前缀各自产出标签盒', () => {
@@ -439,6 +470,7 @@ describe('Canvas painter', () => {
     'setTextAlign',
     'setLineDash',
     'rect',
+    'circle',
     'fill',
     'fillText',
     'beginPath',
@@ -476,6 +508,7 @@ describe('Canvas painter', () => {
       textBaseline: '',
       textAlign: '',
       rect: () => calls.push('rect'),
+      circle: () => calls.push('circle'),
       fill: () => calls.push('fill'),
       setLineDash: () => calls.push('setLineDash'),
       fillText: (text) => {
@@ -491,7 +524,7 @@ describe('Canvas painter', () => {
     const ops = renderCanvasOps(d);
     applyCanvasOps(ops, ctx);
     // setStroke / setFill / setLineWidth / setFont / setTextBaseline / setTextAlign 只做属性赋值，不产生方法调用
-    const DRAW: readonly string[] = ['rect', 'fill', 'setLineDash', 'fillText', 'beginPath', 'moveTo', 'lineTo', 'path', 'stroke'];
+    const DRAW: readonly string[] = ['rect', 'circle', 'fill', 'setLineDash', 'fillText', 'beginPath', 'moveTo', 'lineTo', 'path', 'stroke'];
     expect(calls).toHaveLength(ops.filter((o) => DRAW.includes(o.kind)).length);
     const expected = d.boxes.filter((b) => b.label !== '').map((b) => b.label);
     expect(labels.sort()).toEqual([...expected].sort());

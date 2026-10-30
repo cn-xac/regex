@@ -11,58 +11,17 @@
  * 分配的颜色，同时保留 `class` 与 `data-*` 让宿主可选择性覆盖。
  */
 import type { Diagram, DiagramBox, DiagramPath, BoxTone } from './layout';
+import { resolveTheme } from './theme';
+import type { SvgTheme } from './theme';
 
-export type SvgTheme = 'light' | 'dark';
+export type { SvgTheme };
 
 export interface PaintOptions {
-  readonly theme?: SvgTheme;
+  /** 内置 'light'/'dark' 或任意已注册主题名；未设/未知名回退 'light'。 */
+  readonly theme?: SvgTheme | (string & {});
   readonly fontFamily?: string;
   readonly fontSize?: number;
 }
-
-interface Paint {
-  readonly stroke: string;
-  readonly fill: string;
-  readonly text: string;
-}
-
-const LIGHT: Readonly<Record<BoxTone, Paint>> = Object.freeze({
-  text: Object.freeze({ stroke: '#475569', fill: '#ffffff', text: '#0f172a' }),
-  dot: Object.freeze({ stroke: '#475569', fill: '#e2e8f0', text: '#0f172a' }),
-  escape: Object.freeze({ stroke: '#1c63b5', fill: '#e7f0fa', text: '#123a63' }),
-  characterClass: Object.freeze({ stroke: '#6741d9', fill: '#f1e9fd', text: '#3d2580' }),
-  anchor: Object.freeze({ stroke: '#b8860b', fill: '#fdf3d8', text: '#6b4e05' }),
-  assertion: Object.freeze({ stroke: '#2b8a3e', fill: '#e6f5e9', text: '#175c28' }),
-  backreference: Object.freeze({ stroke: '#c2410c', fill: '#fdeadd', text: '#7c2a08' }),
-  group: Object.freeze({ stroke: '#1c63b5', fill: '#00000000', text: '#123a63' }),
-  choice: Object.freeze({ stroke: '#94a3b8', fill: '#00000000', text: '#0f172a' }),
-  tagQuantifier: Object.freeze({ stroke: '#00000000', fill: '#00000000', text: '#b8860b' }),
-  tagGroupPrefix: Object.freeze({ stroke: '#00000000', fill: '#00000000', text: '#1c63b5' })
-});
-
-const DARK: Readonly<Record<BoxTone, Paint>> = Object.freeze({
-  text: Object.freeze({ stroke: '#94a3b8', fill: '#1b2028', text: '#e6eaf0' }),
-  dot: Object.freeze({ stroke: '#94a3b8', fill: '#252c37', text: '#e6eaf0' }),
-  escape: Object.freeze({ stroke: '#74c0fc', fill: '#16283c', text: '#bfe0ff' }),
-  characterClass: Object.freeze({ stroke: '#b197fc', fill: '#251a3d', text: '#ddcdff' }),
-  anchor: Object.freeze({ stroke: '#ffd43b', fill: '#33290c', text: '#ffe9a8' }),
-  assertion: Object.freeze({ stroke: '#69db7c', fill: '#12291a', text: '#c6f5d0' }),
-  backreference: Object.freeze({ stroke: '#ffa94d', fill: '#341a08', text: '#ffd8b0' }),
-  group: Object.freeze({ stroke: '#74c0fc', fill: '#00000000', text: '#bfe0ff' }),
-  choice: Object.freeze({ stroke: '#64748b', fill: '#00000000', text: '#e6eaf0' }),
-  tagQuantifier: Object.freeze({ stroke: '#00000000', fill: '#00000000', text: '#ffd43b' }),
-  tagGroupPrefix: Object.freeze({ stroke: '#00000000', fill: '#00000000', text: '#74c0fc' })
-});
-
-const EDGE_COLOR: Readonly<Record<SvgTheme, string>> = Object.freeze({
-  // 实测自 Regulex bundle：主干与回环用深灰近黑（#333）、线宽 2。浅色主题取近黑的 #333，
-  // 深色主题相应提亮以保证在深背景上仍是「轨道」而非浅灰细线。
-  light: '#333333',
-  dark: '#c9d1d9'
-});
-
-/** 连线的统一粗细（px）。对标 Regulex 的轨道线宽。 */
-const EDGE_WIDTH = 2;
 
 const DEFAULT_FONT = "ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, monospace";
 
@@ -162,8 +121,9 @@ export function escapeXml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function palette(options: PaintOptions): Readonly<Record<BoxTone, Paint>> {
-  return options.theme === 'dark' ? DARK : LIGHT;
+/** 供两个后端共用：把主题名解析成完整 `ThemePalette`。 */
+function palette(options: PaintOptions) {
+  return resolveTheme(typeof options.theme === 'string' ? options.theme : undefined);
 }
 
 /** 供两个后端共用的字号解析。 */
@@ -183,19 +143,20 @@ function isTagTone(tone: BoxTone): boolean {
  * `data-start` / `data-end` / `data-tone`，视图挂事件后即可做点击反查。
  */
 export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string {
-  const colors = palette(options);
+  const theme = palette(options);
   const font = options.fontFamily ?? DEFAULT_FONT;
   const size = fontSizeOf(options);
-  const edge = EDGE_COLOR[options.theme === 'dark' ? 'dark' : 'light'];
+  const edge = theme.line.trunk.stroke;
+  const edgeWidth = theme.line.trunk.width;
 
   const parts: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${diagram.width}" height="${diagram.height}"`,
     ` viewBox="0 0 ${diagram.width} ${diagram.height}" role="img" class="x-ac-regex-diagram__svg"`,
-    ` data-theme="${options.theme === 'dark' ? 'dark' : 'light'}">`,
+    ` data-theme="${theme.name}">`,
     '<title>Regular expression railroad diagram</title>'
   ];
 
-  parts.push('<g class="x-ac-regex-diagram__edges" stroke="' + edge + '" stroke-width="' + EDGE_WIDTH + '" fill="none">');
+  parts.push('<g class="x-ac-regex-diagram__edges" stroke="' + edge + '" stroke-width="' + edgeWidth + '" fill="none">');
   for (const e of diagram.edges) {
     parts.push(
       `<line data-id="${escapeXml(e.id)}" x1="${round(e.from.x)}" y1="${round(e.from.y)}"` +
@@ -205,7 +166,7 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
   parts.push('</g>');
 
   // 圆角折线（回环 / 旁路 / 分歧线）与实心三角箭头。箭头单独 fill 连线色、无描边。
-  parts.push('<g class="x-ac-regex-diagram__paths" stroke="' + edge + '" stroke-width="' + EDGE_WIDTH + '" fill="none">');
+  parts.push('<g class="x-ac-regex-diagram__paths" stroke="' + edge + '" stroke-width="' + edgeWidth + '" fill="none">');
   for (const p of diagram.paths) {
     const d = roundedPathD(p.points, p.radius);
     // 非贪婪回环用虚线标识（对标 Regulex 以实线/虚线区分贪懒）；旁路与分歧线仍为实线。
@@ -229,7 +190,7 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
 
   parts.push(`<g class="x-ac-regex-diagram__boxes" font-family="${escapeXml(font)}" font-size="${size}">`);
   for (const box of diagram.boxes) {
-    const paint = colors[box.tone];
+    const paint = theme.box[box.tone];
     const tag = isTagTone(box.tone);
     const attrs =
       (box.source === undefined ? '' : ` data-start="${box.source.start}" data-end="${box.source.end}"`) +
@@ -288,11 +249,12 @@ export type CanvasOp =
  * 序列是线性的，正好对应 Canvas 的命令式 API，上层照着执行即可。
  */
 export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): readonly CanvasOp[] {
-  const colors = palette(options);
+  const theme = palette(options);
   const font = options.fontFamily ?? DEFAULT_FONT;
   const size = fontSizeOf(options);
-  const edge = EDGE_COLOR[options.theme === 'dark' ? 'dark' : 'light'];
-  const ops: CanvasOp[] = [{ kind: 'setLineWidth', value: EDGE_WIDTH }];
+  const edge = theme.line.trunk.stroke;
+  const edgeWidth = theme.line.trunk.width;
+  const ops: CanvasOp[] = [{ kind: 'setLineWidth', value: edgeWidth }];
 
   ops.push({ kind: 'setStroke', value: edge }, { kind: 'beginPath' });
   for (const e of diagram.edges) {
@@ -304,7 +266,7 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
   // 每条 path 单独成一条 beginPath…stroke（多条回环不能连成一团）。箭头是实心三角，单独 fill。
   for (const p of diagram.paths) {
     ops.push(
-      { kind: 'setLineWidth', value: EDGE_WIDTH },
+      { kind: 'setLineWidth', value: edgeWidth },
       { kind: 'setStroke', value: edge },
       { kind: 'beginPath' },
       { kind: 'path', points: p.points, radius: p.radius, dash: p.tone === 'loop' && p.arrow === 'tail' },
@@ -322,7 +284,7 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
     { kind: 'setTextBaseline', value: 'middle' }
   );
   for (const box of diagram.boxes) {
-    const paint = colors[box.tone];
+    const paint = theme.box[box.tone];
     const tag = isTagTone(box.tone);
     if (!tag) {
       ops.push({ kind: 'setFill', value: paint.fill }, { kind: 'setStroke', value: paint.stroke });

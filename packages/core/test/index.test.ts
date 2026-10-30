@@ -31,6 +31,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'PATTERN_METACHARACTERS',
   'SUPPORTED_LOCALES',
   'applyCanvasOps',
+  'boundaryLabel',
   'checkFlagSupport',
   'chunkPresentation',
   'collectNodes',

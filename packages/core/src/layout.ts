@@ -14,7 +14,7 @@
  * 5. **内容与框之间留白，且主体在内容区垂直居中**；标签与量化后缀都不参与垂直分配，
  *    否则同一条序列里的元素会互相错位。
  */
-import { quantifierLabel, tokenLabel } from './i18n';
+import { quantifierLabel, tokenLabel, boundaryLabel } from './i18n';
 import type { Locale } from './i18n';
 import type { AstNode } from './parser';
 import type { SourceRange } from './types';
@@ -274,7 +274,11 @@ function leafLabel(node: AstNode, ctx: Ctx): { label: string; tone: BoxTone; esc
       };
     case 'assertion': {
       const text = node.text ?? '';
-      return { label: text === '^' || text === '$' ? text : BS + text, tone: 'anchor' };
+      if (text === '^' || text === '$') return { label: text, tone: 'anchor' };
+      // \b / \B 出中文语义（含义隐晦），^ $ 保持符号；原始写法存 escaped 保留可逆。
+      const boundary = boundaryLabel(ctx.locale, text);
+      if (boundary !== null) return { label: boundary, tone: 'anchor', escaped: BS + text };
+      return { label: BS + text, tone: 'anchor' };
     }
     default:
       return { label: node.text ?? '', tone: 'text' };

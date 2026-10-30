@@ -201,6 +201,17 @@ describe('layout 不变量', () => {
     expect(boxesOf('\\s\\+', 'zh-CN').map((b) => b.label)).toEqual(['空白', '\\+']);
   });
 
+  /** \b / \B 含义隐晦，图上给中文语义并保留原始写法可逆；^ $ 仍是符号。 */
+  it('词边界 \\b/\\B 出语义标签，^ $ 保持符号', () => {
+    const anchors = (p: string, locale: Locale = 'zh-CN') =>
+      boxesOf(p, locale).filter((b) => b.tone === 'anchor');
+    expect(anchors('\\b\\B').map((b) => b.label)).toEqual(['单词边界', '非单词边界']);
+    expect(anchors('\\b\\B').map((b) => b.escaped)).toEqual(['\\b', '\\B']);
+    expect(anchors('\\b', 'en').map((b) => b.label)).toEqual(['word boundary']);
+    // ^ $ 不翻译
+    expect(anchors('^$').map((b) => b.label)).toEqual(['^', '$']);
+  });
+
   /** 使用者反馈 3：组框上方标 #N；非捕获与断言不标编号。 */
   it('捕获组标 #N、命名组带名字，非捕获与断言不标编号', () => {
     const tags = (p: string) =>

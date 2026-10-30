@@ -96,6 +96,8 @@ export type MessageKey =
   | 'token.nonWordChar'
   | 'token.whitespace'
   | 'token.nonWhitespace'
+  | 'token.wordBoundary'
+  | 'token.nonWordBoundary'
   | 'token.quantZeroOrMore'
   | 'token.quantOneOrMore'
   | 'token.quantZeroOrOne'
@@ -167,6 +169,8 @@ const ZH: Record<MessageKey, string> = {
   'token.nonWordChar': '非字母',
   'token.whitespace': '空白',
   'token.nonWhitespace': '非空白',
+  'token.wordBoundary': '单词边界',
+  'token.nonWordBoundary': '非单词边界',
   'token.quantZeroOrMore': '0次以上',
   'token.quantOneOrMore': '一次以上',
   'token.quantZeroOrOne': '0或1次',
@@ -239,6 +243,8 @@ const EN: Record<MessageKey, string> = {
   'token.nonWordChar': 'non-letter',
   'token.whitespace': 'whitespace',
   'token.nonWhitespace': 'non-whitespace',
+  'token.wordBoundary': 'word boundary',
+  'token.nonWordBoundary': 'non-word boundary',
   'token.quantZeroOrMore': '0 or more',
   'token.quantOneOrMore': '1 or more',
   'token.quantZeroOrOne': '0 or 1',
@@ -341,6 +347,17 @@ export function tokenLabel(locale: Locale, escaped: string): string | null {
   if (escaped === '.') return translate(locale, 'token.anyChar');
   const key = TOKEN_KEYS[escaped];
   return key === undefined ? null : translate(locale, key);
+}
+
+/**
+ * 词边界断言 `\b` / `\B` 的图上语义标签。返回 `null` 表示不是词边界（如 `^` `$`），
+ * 调用方应退回原始符号。这两个转义对非专家含义隐晦，故给中文语义，原始写法由视图存
+ * `data-escaped` 保留可逆。
+ */
+export function boundaryLabel(locale: Locale, text: string): string | null {
+  if (text === 'b') return translate(locale, 'token.wordBoundary');
+  if (text === 'B') return translate(locale, 'token.nonWordBoundary');
+  return null;
 }
 
 /** 量词的次数语义（按使用者要求：`+` 说「一次以上」、`*` 说「0次以上」，懒惰追加「非贪婪」）。 */

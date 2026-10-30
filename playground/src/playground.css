@@ -14,8 +14,19 @@
   --pg-muted: #64748b;
 }
 
+/* 手动切换优先：顶部工具条把 data-theme 写到根节点，整页变量随之前翻转。
+   无 attribute 时回退 prefers-color-scheme，保证首屏（JS 前）不闪白。 */
+:root[data-theme='dark'] {
+  --pg-fg: #e6eaf0;
+  --pg-bg: #0e1116;
+  --pg-card: #171b22;
+  --pg-line: #2b3240;
+  --pg-accent: #74c0fc;
+  --pg-muted: #9aa5b4;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --pg-fg: #e6eaf0;
     --pg-bg: #0e1116;
     --pg-card: #171b22;
@@ -57,7 +68,7 @@ body {
 .pg-tabs {
   display: flex;
   gap: 6px;
-  margin: 18px 0 12px;
+  margin: 14px 0 12px;
   flex-wrap: wrap;
 }
 
@@ -137,29 +148,39 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* 画廊 tab：语言/主题切换条 + 逐 pattern 图卡 */
-.pg-gallery-bar {
+/* 全局切换条：主题 / 语言，位于 tab 上方，整页跟随 */
+.pg-toolbar {
   display: flex;
-  gap: 18px;
+  gap: 22px;
   flex-wrap: wrap;
-  margin: 6px 0 16px;
+  align-items: center;
+  margin: 16px 0 0;
 }
 
-.pg-gallery-bar select {
-  padding: 5px 8px;
-  border: 1px solid var(--pg-line);
-  border-radius: 6px;
-  background: var(--pg-bg);
-  color: inherit;
-  font: inherit;
+.pg-toolbar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.pg-gallery-item {
-  margin: 0 0 18px;
-}
-
-.pg-gallery-item figcaption {
-  margin: 0 0 6px;
-  font-size: 13px;
+.pg-toolbar__label {
+  font-size: 12px;
   color: var(--pg-muted);
+}
+
+.pg-chip {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--pg-muted);
+  background: var(--pg-card);
+  border: 1px solid var(--pg-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.pg-chip[aria-pressed='true'] {
+  color: #ffffff;
+  background: var(--pg-accent);
+  border-color: var(--pg-accent);
 }

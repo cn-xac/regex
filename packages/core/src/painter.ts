@@ -99,9 +99,9 @@ function palette(options: PaintOptions) {
   return resolveTheme(typeof options.theme === 'string' ? options.theme : undefined);
 }
 
-/** 供两个后端共用的字号解析。 */
+/** 供两个后端共用的字号解析（与 layout 的默认 fontSize 对齐，避免文字与盒子尺寸口径不一）。 */
 function fontSizeOf(options: PaintOptions): number {
-  return options.fontSize ?? 13;
+  return options.fontSize ?? 16;
 }
 
 /** 标签类盒子不画框，只写字。 */

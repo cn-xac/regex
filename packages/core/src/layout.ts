@@ -111,16 +111,18 @@ export interface Diagram {
 }
 
 export const DEFAULT_METRICS: DiagramMetrics = Object.freeze({
-  charWidth: 9,
-  lineHeight: 17,
+  // 对标 Regulex 可视化源码实测值：主字号 m=16、标签 b=14、元素水平间距 _=16、
+  // 内边距 k=10（盒子约 +12）。charWidth 取 10 让 monospace 16px 文字不贴边溢出。
+  charWidth: 10,
+  lineHeight: 18,
   leafHeight: 28,
-  padX: 9,
-  padY: 9,
-  gapX: 10,
+  padX: 8,
+  padY: 8,
+  gapX: 16,
   gapY: 14,
-  minWidth: 26,
-  fontSize: 13,
-  tagFontSize: 11
+  minWidth: 30,
+  fontSize: 16,
+  tagFontSize: 14
 });
 
 /** 回环 / 旁路折线的内拐点倒圆半径（px）。**实测自 Regulex 可视化源码**：其圆角偏移量

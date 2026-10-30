@@ -93,7 +93,7 @@ export const LIGHT: ThemePalette = Object.freeze({
     assertion: box('#2b8a3e', '#00000000', '#175c28', 6, CONTAINER_DASH),
     backreference: box('#00000000', '#86a7d6', '#10233f', 8),
     group: box('#1c63b5', '#00000000', '#123a63', 6, CONTAINER_DASH),
-    nonCapturing: box('#64748b', '#00000000', '#334155', 6, CONTAINER_DASH),
+    nonCapturing: box('#94a3b8', '#00000000', '#334155', 6, CONTAINER_DASH),
     choice: box('#94a3b8', '#00000000', '#0f172a', 6, CONTAINER_DASH),
     tagQuantifier: box('#00000000', '#00000000', '#b8860b', 0),
     tagGroupPrefix: box('#00000000', '#00000000', '#1c63b5', 0)

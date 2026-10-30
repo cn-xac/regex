@@ -16,6 +16,7 @@ import {
 import type { MessageKey } from '@x-ac/regex-core';
 import { Regex as RegexReact } from '@x-ac/regex-react';
 import { Regex as RegexVue } from '@x-ac/regex-vue';
+import { Gallery } from './Gallery';
 
 /**
  * Playground —— 三个 tab 验证同一颗引擎在三种消费形态下表现一致。
@@ -41,12 +42,13 @@ function browserLocaleCandidates(): string[] {
   return navigator.language ? [navigator.language] : [];
 }
 
-type TabId = 'vanilla' | 'vue' | 'react';
+type TabId = 'vanilla' | 'vue' | 'react' | 'gallery';
 
 const TABS: readonly { id: TabId; label: string }[] = [
   { id: 'vanilla', label: 'vanilla' },
   { id: 'vue', label: 'vue 3' },
-  { id: 'react', label: 'react 19' }
+  { id: 'react', label: 'react 19' },
+  { id: 'gallery', label: '画廊 · 预览' }
 ];
 
 function VanillaPanel({ candidates }: { candidates: readonly string[] }): JSX.Element {
@@ -165,6 +167,7 @@ export function App(): JSX.Element {
           <RegexReact pattern={DEMO_PATTERN} flags={DEMO_FLAGS} localeCandidates={candidates} />
         </section>
       ) : null}
+      {tab === 'gallery' ? <Gallery candidates={candidates} /> : null}
     </div>
   );
 }

@@ -136,3 +136,30 @@ body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* 画廊 tab：语言/主题切换条 + 逐 pattern 图卡 */
+.pg-gallery-bar {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin: 6px 0 16px;
+}
+
+.pg-gallery-bar select {
+  padding: 5px 8px;
+  border: 1px solid var(--pg-line);
+  border-radius: 6px;
+  background: var(--pg-bg);
+  color: inherit;
+  font: inherit;
+}
+
+.pg-gallery-item {
+  margin: 0 0 18px;
+}
+
+.pg-gallery-item figcaption {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--pg-muted);
+}

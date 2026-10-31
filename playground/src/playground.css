@@ -143,6 +143,11 @@ body {
   background: var(--pg-card);
 }
 
+/* Canvas 后端宿主里的画布：块级、按 CSS 尺寸显示（后备缓冲由 painter 按 DPR 放大）。 */
+.pg-canvas {
+  display: block;
+}
+
 .pg-out {
   margin: 10px 0 0;
   padding: 10px;

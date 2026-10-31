@@ -13,9 +13,10 @@ import {
   resolveLocale,
   translate
 } from '@x-ac/regex-core';
-import type { Locale, MessageKey } from '@x-ac/regex-core';
+import type { Diagram, Locale, MessageKey } from '@x-ac/regex-core';
 import { Regex as RegexReact } from '@x-ac/regex-react';
 import { Regex as RegexVue } from '@x-ac/regex-vue';
+import { renderDiagramToCanvas } from './canvas-painter';
 
 /**
  * Playground —— 三个 tab 验证同一颗引擎在三种消费形态下表现一致。
@@ -36,6 +37,8 @@ const DEMO_PATTERN = '(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})';
 const DEMO_FLAGS = 'ggi';
 
 type ThemeName = 'light' | 'dark';
+/** 渲染后端：SVG（矢量字符串）或 Canvas（core 指令序列 → 2D ctx）。 */
+type RenderMode = 'svg' | 'canvas';
 
 /**
  * core 不读 `navigator` / `matchMedia`（无 DOM 是铁律），语言与主题的**初值探测**
@@ -69,6 +72,7 @@ const LOCALES: readonly { id: Locale; label: string }[] = [
 interface GlobalControls {
   readonly theme: ThemeName;
   readonly lang: Locale;
+  readonly renderMode: RenderMode;
 }
 
 function VanillaPanel({
@@ -80,8 +84,10 @@ function VanillaPanel({
 }): JSX.Element {
   const outRef = useRef<HTMLPreElement | null>(null);
   const svgRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [pattern, setPattern] = useState<string>(DEMO_PATTERN);
   const [flags, setFlags] = useState<string>(DEMO_FLAGS);
+  const normalizedFlags = normalizeFlags(flags);
 
   useEffect(() => {
     const out = outRef.current;
@@ -89,34 +95,46 @@ function VanillaPanel({
     const locale = resolveLocale(candidates);
     const t = (key: MessageKey): string => translate(locale, key);
     const parsed = parseFlags(flags);
-    const normalized = normalizeFlags(flags);
     const lines: string[] = [
       `${t('app.title')} [${locale}]`,
-      `${t('field.pattern')}: /${pattern}/${normalized}`,
-      `${t('field.flags')}: '${flags}' → '${normalized}'`,
+      `${t('field.pattern')}: /${pattern}/${normalizedFlags}`,
+      `${t('field.flags')}: '${flags}' → '${normalizedFlags}'`,
       ...parsed.issues.map(
         (issue) => `[${issue.severity}] ${issue.code}@${issue.index ?? '-'} ${issue.message}`
       )
     ];
     out.textContent = lines.join('\n');
-  }, [candidates, pattern, flags]);
+  }, [candidates, pattern, flags, normalizedFlags]);
 
-  // 无框架出图：core 产 SVG 字符串，这里只是 innerHTML 一行的事。theme 跟随全局切换器。
+  // 无框架出图：一次算好几何 Diagram，SVG / Canvas 两个后端都从它出发（同一引擎、两种形态）。
+  const diagram = useMemo<Diagram | null>(() => {
+    const result = parsePattern(pattern, normalizedFlags);
+    return result.ok
+      ? layoutRailroad(result.ast, { locale: resolveLocale(candidates), flags: normalizedFlags })
+      : null;
+  }, [pattern, normalizedFlags, candidates]);
+
+  // SVG 后端：core 产标记字符串，宿主只管 innerHTML。
   useEffect(() => {
+    if (controls.renderMode !== 'svg') return;
     const host = svgRef.current;
     if (host === null) return;
-    const result = parsePattern(pattern, normalizeFlags(flags));
-    host.innerHTML = result.ok
-      ? renderSvg(layoutRailroad(result.ast, { locale: resolveLocale(candidates), flags: normalizeFlags(flags) }), {
-          theme: controls.theme
-        })
-      : '';
-  }, [pattern, flags, candidates, controls.theme]);
+    host.innerHTML = diagram === null ? '' : renderSvg(diagram, { theme: controls.theme });
+  }, [diagram, controls.renderMode, controls.theme]);
+
+  // Canvas 后端：core 产指令序列，经 canvas-painter 适配层落到 2D ctx。
+  useEffect(() => {
+    if (controls.renderMode !== 'canvas') return;
+    const canvas = canvasRef.current;
+    if (canvas === null || diagram === null) return;
+    renderDiagramToCanvas(canvas, diagram, controls.theme);
+  }, [diagram, controls.renderMode, controls.theme]);
 
   return (
     <section className="pg-panel">
       <p className="pg-hint">
         不依赖任何框架，直接 import <code>@x-ac/regex-core</code> 的纯函数并用原生 DOM 渲染。
+        顶部「渲染」切换器决定这块用 <b>SVG</b> 还是 <b>Canvas</b>——两者都出自同一颗 core 引擎。
       </p>
       <label className="pg-field">
         <span>pattern</span>
@@ -137,7 +155,13 @@ function VanillaPanel({
         />
       </label>
       <pre ref={outRef} className="pg-out pg-mono" />
-      <div ref={svgRef} className="pg-diagram" />
+      {controls.renderMode === 'svg' ? (
+        <div ref={svgRef} className="pg-diagram" />
+      ) : (
+        <div className="pg-diagram">
+          <canvas ref={canvasRef} className="pg-canvas" />
+        </div>
+      )}
     </section>
   );
 }
@@ -180,10 +204,11 @@ export function App(): JSX.Element {
   const [tab, setTab] = useState<TabId>('vanilla');
   const [theme, setTheme] = useState<ThemeName>(systemPrefersDark() ? 'dark' : 'light');
   const [lang, setLang] = useState<Locale>(resolveLocale(detectedCandidates));
+  const [renderMode, setRenderMode] = useState<RenderMode>('svg');
 
   // 全局语言：把用户选定的 locale 当作唯一候选注入下游，页面所有文字随它切换。
   const candidates = useMemo<readonly string[]>(() => [lang], [lang]);
-  const controls: GlobalControls = { theme, lang };
+  const controls: GlobalControls = { theme, lang, renderMode };
 
   // 主题写进根节点，CSS 变量（含 body 背景）随之翻转。
   useEffect(() => {
@@ -225,6 +250,20 @@ export function App(): JSX.Element {
               onClick={() => setLang(item.id)}
             >
               {item.label}
+            </button>
+          ))}
+        </span>
+        <span className="pg-toolbar__group">
+          <span className="pg-toolbar__label">渲染</span>
+          {(['svg', 'canvas'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className="pg-chip"
+              aria-pressed={renderMode === mode}
+              onClick={() => setRenderMode(mode)}
+            >
+              {mode === 'svg' ? 'SVG' : 'Canvas'}
             </button>
           ))}
         </span>

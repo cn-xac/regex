@@ -11,7 +11,7 @@
  * 关于 `v-html`：内容全部来自 `renderSvg`，其中每个 label 都过了 `escapeXml`，
  * 不含任何用户可注入的原始标记；这是本项目里唯一使用 v-html 的地方。
  */
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, type Ref } from 'vue';
 import {
   FLAG_ORDER,
   chunkPresentation,
@@ -30,7 +30,8 @@ import {
   translate,
   withFlag
 } from '@x-ac/regex-core';
-import type { Locale, MessageKey, RegexFlag, SvgTheme, TranslateParams } from '@x-ac/regex-core';
+import type { Diagram, Locale, MessageKey, RegexFlag, SvgTheme, TranslateParams } from '@x-ac/regex-core';
+import { paintDiagramOnCanvas } from './canvas-ctx';
 import '@x-ac/regex-core/style.css';
 
 const props = withDefaults(
@@ -43,8 +44,10 @@ const props = withDefaults(
     localeCandidates?: readonly string[];
     /** 导出的 SVG 配色。宿主想跟随系统时自行传值（core 不读 matchMedia）。 */
     svgTheme?: SvgTheme;
+    /** 渲染后端：`'svg'`（默认）或 `'canvas'`。 */
+    backend?: 'svg' | 'canvas';
   }>(),
-  { pattern: '', flags: 'g', text: '', localeCandidates: () => [], svgTheme: 'light' }
+  { pattern: '', flags: 'g', text: '', localeCandidates: () => [], svgTheme: 'light', backend: 'svg' }
 );
 
 const emit = defineEmits<{
@@ -104,15 +107,31 @@ function onTextInput(event: Event): void {
   emit('update:text', target.value);
 }
 
-/** 铁路图 SVG。pattern 非法（或被复验拒绝）时为空串，界面退回占位提示。 */
-const diagram = computed<string>(() => {
+/** 铁路图几何（Diagram）；pattern 非法时为 null。 */
+const diagramData = computed<Diagram | null>(() => {
   const result = parsePattern(parsed.value.pattern, parsed.value.flags);
-  if (!result.ok) return '';
-  return renderSvg(
-    layoutRailroad(result.ast, { locale: locale.value, flags: parsed.value.flags }),
-    { theme: props.svgTheme }
-  );
+  if (!result.ok) return null;
+  return layoutRailroad(result.ast, { locale: locale.value, flags: parsed.value.flags });
 });
+
+/** SVG 字符串（backend='svg' 时用）。 */
+const diagramSvg = computed<string>(() => {
+  if (diagramData.value === null) return '';
+  return renderSvg(diagramData.value, { theme: props.svgTheme });
+});
+
+/** Canvas 渲染：backend + diagramData + svgTheme 变化时重绘。 */
+const canvasRef: Ref<HTMLCanvasElement | null> = ref(null);
+watch(
+  [canvasRef, diagramData, () => props.backend, () => props.svgTheme],
+  () => {
+    if (props.backend !== 'canvas') return;
+    const canvas = canvasRef.value;
+    if (canvas === null || diagramData.value === null) return;
+    paintDiagramOnCanvas(canvas, diagramData.value, props.svgTheme);
+  },
+  { flush: 'post' }
+);
 
 function onSourceInput(event: Event): void {
   const target = event.target as HTMLInputElement | null;
@@ -207,9 +226,12 @@ function toggleFlag(flag: RegexFlag): void {
       :data-groups="chunkPresentation(chunk).groupOrdinals.join(',') || undefined"
       >{{ chunk.text }}</span></pre>
 
-    <div class="x-ac-regex-diagram" data-backend="svg">
-      <!-- eslint-disable-next-line vue/html-self-closing -->
-      <div v-if="diagram" class="x-ac-regex-diagram__svg-host" v-html="diagram"></div>
+    <div class="x-ac-regex-diagram" :data-backend="props.backend">
+      <template v-if="diagramData">
+        <!-- eslint-disable-next-line vue/html-self-closing -->
+        <div class="x-ac-regex-diagram__svg-host" v-html="diagramSvg"></div>
+        <canvas ref="canvasRef" class="x-ac-regex-diagram__canvas"></canvas>
+      </template>
       <p v-else class="x-ac-regex-diagram__empty">{{ t('view.emptyDiagram') }}</p>
     </div>
   </div>

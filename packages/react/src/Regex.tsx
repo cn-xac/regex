@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 
 import {
@@ -19,7 +19,8 @@ import {
   translate,
   withFlag
 } from '@x-ac/regex-core';
-import type { Locale, MessageKey, RegexFlag, SvgTheme, TranslateParams } from '@x-ac/regex-core';
+import type { Diagram, Locale, MessageKey, RegexFlag, SvgTheme, TranslateParams } from '@x-ac/regex-core';
+import { paintDiagramOnCanvas } from './canvas-ctx';
 
 import '@x-ac/regex-core/style.css';
 
@@ -42,6 +43,8 @@ export interface RegexProps {
   localeCandidates?: readonly string[];
   /** 导出的 SVG 配色。宿主想跟随系统时自行传值（core 不读 matchMedia）。 */
   svgTheme?: SvgTheme;
+  /** 渲染后端：`'svg'`（默认）或 `'canvas'`。 */
+  backend?: 'svg' | 'canvas';
   onPatternChange?: (value: string) => void;
   onFlagsChange?: (value: string) => void;
   onTextChange?: (value: string) => void;
@@ -57,10 +60,13 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
     text = '',
     localeCandidates = [],
     svgTheme = 'light',
+    backend = 'svg',
     onPatternChange,
     onFlagsChange,
     onTextChange
   } = props;
+
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // 依赖用 join 后的字符串而非数组本身：调用方常传字面量数组，引用每轮都变。
   const candidateKey = localeCandidates.join(',');
@@ -105,14 +111,26 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
     [parsed]
   );
 
-  /** 铁路图 SVG。pattern 非法（或被复验拒绝）时为空串，界面退回占位提示。 */
-  const diagram = useMemo<string>(() => {
+  /** 铁路图几何（Diagram）；pattern 非法时为 null。 */
+  const diagramData = useMemo<Diagram | null>(() => {
     const result = parsePattern(parsed.pattern, parsed.flags);
-    if (!result.ok) return '';
-    return renderSvg(layoutRailroad(result.ast, { locale, flags: parsed.flags }), {
-      theme: svgTheme
-    });
-  }, [parsed, svgTheme, locale]);
+    if (!result.ok) return null;
+    return layoutRailroad(result.ast, { locale, flags: parsed.flags });
+  }, [parsed, locale]);
+
+  /** SVG 字符串（backend='svg' 时用）。 */
+  const diagramSvg = useMemo<string>(() => {
+    if (diagramData === null) return '';
+    return renderSvg(diagramData, { theme: svgTheme });
+  }, [diagramData, svgTheme]);
+
+  /** Canvas 后端：diagramData 或 theme 变化时重绘。 */
+  useEffect(() => {
+    if (backend !== 'canvas') return;
+    const canvas = canvasRef.current;
+    if (canvas === null || diagramData === null) return;
+    paintDiagramOnCanvas(canvas, diagramData, svgTheme);
+  }, [backend, diagramData, svgTheme]);
 
   /** 匹配结果 → 区间 → 渲染片段；三步全在 core，视图只负责铺节点。 */
   const session = useMemo(
@@ -243,14 +261,17 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
         })}
       </pre>
 
-      <div className="x-ac-regex-diagram" data-backend="svg">
-        {diagram === '' ? (
+      <div className="x-ac-regex-diagram" data-backend={backend}>
+        {diagramSvg === '' && diagramData === null ? (
           <p className="x-ac-regex-diagram__empty">{t('view.emptyDiagram')}</p>
         ) : (
-          <div
-            className="x-ac-regex-diagram__svg-host"
-            dangerouslySetInnerHTML={{ __html: diagram }}
-          />
+          <>
+            <div
+              className="x-ac-regex-diagram__svg-host"
+              dangerouslySetInnerHTML={{ __html: diagramSvg }}
+            />
+            <canvas ref={canvasRef} className="x-ac-regex-diagram__canvas" />
+          </>
         )}
       </div>
     </div>

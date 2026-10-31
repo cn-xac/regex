@@ -175,7 +175,7 @@ function VuePanel({
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const candidateKey = candidates.join(',');
-  const { theme } = controls;
+  const { theme, renderMode } = controls;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -184,13 +184,14 @@ function VuePanel({
       pattern: DEMO_PATTERN,
       flags: DEMO_FLAGS,
       localeCandidates: candidateKey === '' ? [] : candidateKey.split(','),
-      svgTheme: theme
+      svgTheme: theme,
+      backend: renderMode
     });
     instance.mount(host);
     return () => {
       instance.unmount();
     };
-  }, [candidateKey, theme]);
+  }, [candidateKey, theme, renderMode]);
 
   return (
     <section className="pg-panel">
@@ -293,6 +294,7 @@ export function App(): JSX.Element {
             flags={DEMO_FLAGS}
             localeCandidates={[...candidates]}
             svgTheme={theme}
+            backend={renderMode}
           />
         </section>
       ) : null}

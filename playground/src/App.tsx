@@ -156,9 +156,9 @@ function VanillaPanel({
       </label>
       <pre ref={outRef} className="pg-out pg-mono" />
       {controls.renderMode === 'svg' ? (
-        <div ref={svgRef} className="pg-diagram" />
+        <div key="pg-diagram-svg" ref={svgRef} className="pg-diagram" />
       ) : (
-        <div className="pg-diagram">
+        <div key="pg-diagram-canvas" className="pg-diagram">
           <canvas ref={canvasRef} className="pg-canvas" />
         </div>
       )}

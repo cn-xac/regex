@@ -267,8 +267,8 @@ describe('layout 不变量', () => {
   });
 
   /**
-   * 该修复必须**非回归**：只有下探旁路的组撑高，仅上方回环 / 纯字面量的组下留白不变，
-   * 否则又会把观感推回反复调过的对称/收紧档（探针实测 `(?<a>\d+)` 容器 h=106 不变）。
+   * 该修复必须**非回归**：只有下探旁路的组比仅上方回环的组更高（旁路 skipDepth 撑高），
+   * 二者上沿对齐。
    */
   it('仅上方回环的组不被旁路修复撑高（下留白守恒）', () => {
     const loopOnly = diagramFor('(?<a>\\d+)');
@@ -278,6 +278,35 @@ describe('layout 不变量', () => {
     // 二者上沿与内容高相同；bypass 版仅因旁路而下延，故更高。差值应恰为旁路相对回环的多出留白。
     expect(bypassBox.y).toBe(loopBox.y);
     expect(bypassBox.h).toBeGreaterThan(loopBox.h);
+  });
+
+  /**
+   * 使用者反馈：嵌套分组显示异常（内层框下方大片空白、上下不对称、逐层偏上）。
+   * 根因是序列聚合 `below = height - Y0` 给每组凭空加半格下留白，**逐层累加**。
+   * 钉死不变量：纯嵌套无旁路时，最内层组「内容块底 → 框底」的留白恰为 padY（不虚高）。
+   */
+  it('嵌套分组下留白不逐层累加（纯嵌套最内层组下方恰为 padY）', () => {
+    const CONTAINER = ['group', 'nonCapturing', 'assertion'];
+    for (const p of ['((a))', '(?<o>(?<i>a))', '(?:(?:a))', '(a((b)))']) {
+      const d = diagramFor(p);
+      const innermost = d.boxes
+        .filter((b) => CONTAINER.includes(b.tone))
+        .sort((a, b) => b.depth - a.depth)[0];
+      if (innermost === undefined) throw new Error(`${p} 无容器框`);
+      const right = innermost.x + innermost.w;
+      // 落在最内层框里的叶子块（非容器、非标签）
+      const leaf = d.boxes.find(
+        (b) =>
+          !CONTAINER.includes(b.tone) &&
+          b.tone !== 'tagQuantifier' &&
+          b.tone !== 'tagGroupPrefix' &&
+          b.x >= innermost.x - 1 &&
+          b.x + b.w <= right + 1
+      );
+      if (leaf === undefined) throw new Error(`${p} 最内层框里找不到叶子`);
+      const gap = innermost.y + innermost.h - (leaf.y + leaf.h);
+      expect(gap, `${p}：最内层组下方留白应=padY，不虚高累加`).toBeCloseTo(DEFAULT_METRICS.padY, 1);
+    }
   });
 
   /**

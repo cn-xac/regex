@@ -78,7 +78,7 @@ export { applyCanvasOps, escapeXml, renderCanvasOps, renderSvg } from './painter
 
 export type { CanvasOp, PaintContext, PaintOptions, SvgTheme } from './painter';
 
-export { DARK, LIGHT, listThemes, registerTheme, resolveTheme } from './theme';
+export { DARK, LIGHT, derivePalette, isLightPalette, listThemes, registerTheme, resolveTheme } from './theme';
 
 export type { BoxPaint, LineKind, LinePaint, ThemePalette } from './theme';
 

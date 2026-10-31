@@ -126,22 +126,142 @@ const registry = new Map<string, ThemePalette>();
 registry.set(LIGHT.name, LIGHT);
 registry.set(DARK.name, DARK);
 
-/** 注册（或覆盖）一个命名主题，供后续 `renderSvg`/`renderCanvasOps` 按名消费。 */
-export function registerTheme(palette: ThemePalette): void {
-  registry.set(palette.name, palette);
+// ─── 颜色工具：hex ↔ HSL ───
+
+interface HSL { h: number; s: number; l: number }
+
+/** #RRGGBB / #AARRGGBB → HSL（忽略 alpha）。 */
+function hexToHsl(hex: string): HSL | null {
+  // strip optional alpha (#RRGGBBAA / #AARRGGBB)
+  const m = /^#([0-9a-f]{6})/i.exec(hex);
+  if (m === null) return null;
+  const raw = m[1];
+  if (raw === undefined) return null;
+  const int = parseInt(raw, 16);
+  const r = ((int >> 16) & 0xff) / 255;
+  const g = ((int >> 8) & 0xff) / 255;
+  const b = (int & 0xff) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return { h: h * 360, s, l };
 }
 
-/** 已注册主题名列表（只读快照）。 */
-export function listThemes(): readonly string[] {
-  return Object.freeze([...registry.keys()]);
+/** HSL → #RRGGBB。 */
+function hslToHex(hsl: HSL, alpha = 'FF'): string {
+  const { h, s, l } = hsl;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * Math.max(0, Math.min(1, color))).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}${alpha === 'FF' ? '' : alpha}`;
+}
+
+/** 判断一个 hex 色的相对亮度（0=黑, 1=白）。 */
+function luminance(hex: string): number {
+  const hsl = hexToHsl(hex);
+  return hsl === null ? 0.5 : hsl.l;
+}
+
+// ─── 派生工具 ───
+
+/** 翻转单个 hex 色的明度（light↔dark 互补）。保持色相与饱和度不变。 */
+function flipLightness(hex: string): string {
+  if (hex === '#00000000') return hex; // transparent stays transparent
+  const hsl = hexToHsl(hex);
+  if (hsl === null) return hex;
+  // 翻转亮度，clamp 到可读范围 [0.15, 0.85]
+  const newL = Math.max(0.15, Math.min(0.85, 1 - hsl.l));
+  return hslToHex({ ...hsl, l: newL });
 }
 
 /**
- * 解析主题名 → palette。未知名回退 `light`；`undefined` 亦回退 `light`。
- * 大小写不敏感，便于宿主直接透传 CSS `prefers-color-scheme` 之类字符串。
+ * 判断 palette 是亮色档还是暗色档（取 trunk 线亮度为锚）。
+ * 亮色主题轨道线在浅底上取近黑；暗色主题轨道线在深底上取近白。
+ * 因此 luminance(trunk) < 0.5 判为亮色档。
  */
-export function resolveTheme(name?: string): ThemePalette {
+export function isLightPalette(palette: ThemePalette): boolean {
+  return luminance(palette.line.trunk.stroke) < 0.5;
+}
+
+/**
+ * 从一套主题派生互补档。
+ * - 所有 box 的 stroke / fill / text 颜色做亮度翻转
+ * - line 的 stroke 颜色做亮度翻转
+ * - radius、dash 保持不动（几何参数）
+ * - 透明色 `#00000000` 保持透明
+ */
+export function derivePalette(base: ThemePalette, _target?: 'light' | 'dark'): ThemePalette {
+  const deriveBox = (b: BoxPaint): BoxPaint =>
+    Object.freeze({
+      stroke: flipLightness(b.stroke),
+      fill: flipLightness(b.fill),
+      text: flipLightness(b.text),
+      radius: b.radius,
+      dash: b.dash
+    });
+  const deriveLine = (l: LinePaint): LinePaint =>
+    Object.freeze({ stroke: flipLightness(l.stroke), width: l.width, dash: l.dash });
+
+  const box = Object.freeze(
+    Object.fromEntries(
+      (Object.entries(base.box) as [string, BoxPaint][]).map(([k, v]) => [k, deriveBox(v)])
+    ) as Record<string, BoxPaint>
+  ) as ThemePalette['box'];
+  const line = Object.freeze(
+    Object.fromEntries(
+      (Object.entries(base.line) as [string, LinePaint][]).map(([k, v]) => [k, deriveLine(v)])
+    ) as Record<string, LinePaint>
+  ) as ThemePalette['line'];
+
+  return Object.freeze({ name: `${base.name}:${isLightPalette(base) ? 'dark' : 'light'}`, box, line });
+}
+
+// ─── 注册表 API ───
+
+/**
+ * 注册命名主题。
+ * - 无 options：只注册传入的那一套。
+ * - options.derive === true：自动派生互补档，`resolveTheme('name', 'light'|'dark')` 可分别取。
+ */
+export function registerTheme(palette: ThemePalette, options?: { readonly derive?: boolean }): void {
+  registry.set(palette.name.toLowerCase(), palette);
+  if (options?.derive === true) {
+    const derived = derivePalette(palette);
+    const isLight = isLightPalette(palette);
+    // 主注册存原档，副 key 存互补档
+    registry.set(`${palette.name.toLowerCase()}:${isLight ? 'light' : 'dark'}`, palette);
+    registry.set(`${palette.name.toLowerCase()}:${isLight ? 'dark' : 'light'}`, derived);
+  }
+}
+
+/**
+ * 已注册主题名列表（只读快照）。以 `:light` / `:dark` 结尾的是派生副档。
+ */
+export function listThemes(): readonly string[] {
+  return Object.freeze([...registry.keys()].filter(k => !k.endsWith(':light') && !k.endsWith(':dark')));
+}
+
+/**
+ * 解析主题名 → palette。
+ * - 若提供 mode 且该主题已注册派生副档，返回对应亮度档。
+ * - 未知名回退 LIGHT；`undefined` 亦回退 LIGHT。
+ */
+export function resolveTheme(name?: string, mode?: 'light' | 'dark'): ThemePalette {
   if (name === undefined) return LIGHT;
-  const key = name.toLowerCase();
-  return registry.get(key) ?? registry.get(name) ?? LIGHT;
+  const lower = name.toLowerCase();
+  if (mode) {
+    const withMode = registry.get(`${lower}:${mode}`);
+    if (withMode !== undefined) return withMode;
+  }
+  return registry.get(lower) ?? registry.get(name) ?? LIGHT;
 }

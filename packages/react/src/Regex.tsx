@@ -19,7 +19,7 @@ import {
   translate,
   withFlag
 } from '@x-ac/regex-core';
-import type { Diagram, Locale, MessageKey, RegexFlag, SvgTheme, TranslateParams } from '@x-ac/regex-core';
+import type { Diagram, Locale, MessageKey, RegexFlag, TranslateParams } from '@x-ac/regex-core';
 import { paintDiagramOnCanvas } from './canvas-ctx';
 
 import '@x-ac/regex-core/style.css';
@@ -41,8 +41,8 @@ export interface RegexProps {
   text?: string;
   /** 语言候选（宿主传 `[...navigator.languages]`）；core 不读 navigator，故在此注入。 */
   localeCandidates?: readonly string[];
-  /** 导出的 SVG 配色。宿主想跟随系统时自行传值（core 不读 matchMedia）。 */
-  svgTheme?: SvgTheme;
+  /** 导出的 SVG/Canvas 配色主题名。内置 'light' / 'dark'，也可传已注册的自定义主题名。 */
+  svgTheme?: string;
   /** 渲染后端：`'svg'`（默认）或 `'canvas'`。 */
   backend?: 'svg' | 'canvas';
   onPatternChange?: (value: string) => void;

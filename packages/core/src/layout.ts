@@ -639,16 +639,18 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
 
   branches.forEach((branch, i) => {
     const midY = mids[i] ?? spineY;
-    // 分歧线：从入口中线 (0, spineY) 斜插到分支中线 (gapX, midY)。两点即直线段（无拐点
-    // 不产生圆角），归入 paths 体系，与回环/旁路共用同一套渲染。汇聚线同理镜像。
-    // choice 无贪婪性语义，lazy 恒 false。
+    // 分歧线：直角肘线 —— 先从入口中线 (0, spineY) **竖直**到分支中线 y=midY，再**水平**接入分支
+    // 主体左端 (gapX, midY)；拐角交 roundedPathD 按 radius 倒成圆角（≈Regulex 的直角圆角分叉）。
+    // 不再是斜插直线（旧实现会把上下两支挤在一起、标签/框观感乱）。汇聚线左右镜像：先从分支右端
+    // 水平走到 (rightEdge, midY)，再竖直到出口中线 (rightEdge, spineY)。choice 无贪懒语义，lazy 恒 false。
     paths.push({
       id: `${idPath}.in${i}`,
       points: [
         [0, spineY],
+        [0, midY],
         [m.gapX, midY]
       ],
-      radius: 0,
+      radius: RAIL_RADIUS,
       lazy: false,
       tone: 'choice'
     });
@@ -656,9 +658,10 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
       id: `${idPath}.out${i}`,
       points: [
         [m.gapX + branch.width, midY],
+        [rightEdge, midY],
         [rightEdge, spineY]
       ],
-      radius: 0,
+      radius: RAIL_RADIUS,
       lazy: false,
       tone: 'choice'
     });

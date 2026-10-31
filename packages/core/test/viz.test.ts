@@ -310,6 +310,27 @@ describe('layout 不变量', () => {
   });
 
   /**
+   * 使用者反馈：`(1|(?:a|b))` 交替分叉是斜线，要求改成「直角 + 圆角」。
+   * 钉死不变量：所有 tone='choice' 的分叉/汇合路径，每一段都必须是纯水平或纯竖直
+   * （相邻点 dx、dy 不能同时 > 0），且拐点带 radius（>0，供 roundedPathD 倒圆角）。
+   */
+  it('交替分叉/汇合是直角肘线（无斜线段）且带圆角半径', () => {
+    for (const p of ['1|(?:a|b)', '(1|(?:a|b))', 'a|b|c', '(ab|cd|ef)', 'x|(y|z)']) {
+      const d = diagramFor(p);
+      const choicePaths = choiceOf(d);
+      expect(choicePaths.length, `${p} 应有 choice 分叉/汇合线`).toBeGreaterThan(0);
+      for (const cp of choicePaths) {
+        expect(cp.radius, `${p} 肘线应带圆角半径`).toBeGreaterThan(0);
+        for (let i = 1; i < cp.points.length; i++) {
+          const dx = Math.abs(cp.points[i][0] - cp.points[i - 1][0]);
+          const dy = Math.abs(cp.points[i][1] - cp.points[i - 1][1]);
+          expect(dx > 0.5 && dy > 0.5, `${p} 出现斜线段`).toBe(false);
+        }
+      }
+    }
+  });
+
+  /**
    * 使用者反馈：前缀标签要「居中 + 移到框上方」，字号独立于次数标签。
    * 钉死五种前缀在中英双语下：① 水平居中于框 ② 整块在框上沿之上 ③ 字号=prefixFontSize。
    */

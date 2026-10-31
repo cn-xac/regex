@@ -389,9 +389,10 @@ describe('layout 不变量', () => {
   });
 
   /**
-   * 钉死五种前缀在中英双语下：① 水平居中于框 ② 整块在框上沿之上 ③ 字号=prefixFontSize。
+   * 钉死五种前缀在中英双语下：① 水平居中于框 ② 落在**框内顶端**（标签高度算进框高，对齐 Regulex，
+   * 不再浮在框外上方——否则下层分支的标签飘进分支间隙看着不属于自己框） ③ 字号=prefixFontSize。
    */
-  it('前缀标签居中于框、浮在框正上方、用独立小字号', () => {
+  it('前缀标签居中于框、落在框内顶端、用独立小字号', () => {
     const PREFIX = ['(?:a)', '(?=a)', '(?!a)', '(?<=a)', '(?<!a)'];
     for (const locale of ['zh-CN', 'en'] as const) {
       for (const p of PREFIX) {
@@ -400,7 +401,11 @@ describe('layout 不变量', () => {
         const t = boxes.find((b) => b.tone === 'tagGroupPrefix');
         if (c === undefined || t === undefined) throw new Error(`${locale} ${p} 缺框或标签`);
         expect(t.x + t.w / 2, `${locale} ${p} 未居中`).toBeCloseTo(c.x + c.w / 2, 0);
-        expect(t.y + t.h, `${locale} ${p} 未在框上方`).toBeLessThanOrEqual(c.y);
+        // 落在框内顶端：标签顶在框顶之下、标签整体在框顶部标签行内（不越进内容区）。
+        expect(t.y, `${locale} ${p} 标签应在框内(非框外上方)`).toBeGreaterThanOrEqual(c.y);
+        expect(t.y + t.h, `${locale} ${p} 标签应只在框顶端行内`).toBeLessThanOrEqual(
+          c.y + DEFAULT_METRICS.lineHeight + DEFAULT_METRICS.padY + 6
+        );
         expect(t.fontSize, `${locale} ${p} 前缀字号`).toBe(DEFAULT_METRICS.prefixFontSize);
       }
     }
@@ -484,10 +489,13 @@ describe('layout 不变量', () => {
     // 接触圆弧：每条腿内侧都存在落在 railY 上的「脚」顶点（硬直角 → 汇入弧的证据）。
     const innerFeet = railPts.filter((p) => p[0] > legL + 0.01 && p[0] < legR - 0.01);
     expect(innerFeet.length).toBeGreaterThanOrEqual(2);
-    // 层位：次数标签（弧上）→ 组前缀标签 → 组框，三者自上而下不重叠。
+    // 层位：次数标签（弧上、组框外顶部）高于组前缀标签。
     expect(qLabel.y + qLabel.h).toBeLessThanOrEqual(prefix.y);
-    // 前缀标签已移到**框正上方**（用户反馈：居中 + 框外，英文长标签对称外溢不违和）。
-    expect(prefix.y + prefix.h).toBeLessThanOrEqual(container.y);
+    // 组前缀标签落在**框内顶端**（标签高度算进框高，对齐 Regulex；不再浮在框外上方）。
+    expect(prefix.y).toBeGreaterThanOrEqual(container.y);
+    expect(prefix.y + prefix.h).toBeLessThanOrEqual(
+      container.y + DEFAULT_METRICS.lineHeight + DEFAULT_METRICS.padY + 6
+    );
     // 且水平居中于整框。
     expect(prefix.x + prefix.w / 2).toBeCloseTo(container.x + container.w / 2, 0);
   });

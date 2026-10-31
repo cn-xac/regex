@@ -472,13 +472,17 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       const tagW = prefixWidth(tag, ctx.m);
       // 标签行叠在 inner.above 之上：组内的回环弧占了一层，标签必须再高一层才不会压上去。
       const tagBase = inner.above + 4;
-      // 容器框上沿只包内容（tagBase + padY 在内容之上给内部回环留位），标签不再占框内一行。
-      const containerY = -(tagBase + padY);
-      const containerH = tagBase + padY + inner.height + padY + inner.below;
+      // 标签行整体高度（含缝）——纳入框高计算，使标签画在**框内顶端**而非浮在框外上方。
+      // （此前标签画在 containerY 之上 = 框外，下层分支的标签便飘在上下分支间隙、看着不属于自己框；
+      //  对齐 Regulex：框顶把 labelRow 算进去，标签成为框内第一行，任何层级都紧贴自己框。）
+      const labelRow = labelGap + tagH;
+      // 框上沿 = labelRow（标签行）+ tagBase（回环/量化弧留位）+ padY（内边距），再往下是内容。
+      const containerY = -(tagBase + padY + labelRow);
+      const containerH = tagBase + padY + labelRow + inner.height + padY + inner.below;
       const groupW = inner.width + padX * 2;
-      // 标签水平居中于整框（tagW 可能大于 groupW → 左右对称外溢，因在框上方故不违和）。
+      // 标签水平居中于整框（tagW 可能大于 groupW → 左右对称外溢）。纵向落在框内顶端标签行里。
       const labelX = (groupW - tagW) / 2;
-      const labelY = containerY - labelGap - tagH;
+      const labelY = containerY + labelGap;
       // 容器只补「左右进出 stub」（把框左右缘接到内容主轨），中段交给 inner 自己决定：
       // inner 是 sequence → 自带贯穿轨（连续）；inner 是 choice → 中间本应留空，绝不画整宽线
       // （否则沿 spineY 的整宽线直穿分叉中间 = 多余的「穿心主横线」）。

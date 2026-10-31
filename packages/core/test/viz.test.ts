@@ -352,7 +352,43 @@ describe('layout 不变量', () => {
   });
 
   /**
-   * 使用者反馈：前缀标签要「居中 + 移到框上方」，字号独立于次数标签。
+   * 使用者反馈（截图）：`^((1|(a|b))|\d\w\b\t)$` 里有一条横穿分组框正中间的多余水平「穿心线」。
+   * 根因：placeGroup/placeQuantified 画了整宽 railEdge；当内容其实是 choice（中间本应空）时
+   * 这条线直穿分叉。修复＝容器只补左右进出 stub、中段交给内容。钉死：对「包着交替的组」，
+   * 在其 spineY（=左 stub 的 y）上不得存在两端都严格落在框内内容区(去掉左右 padX 内边距)的水平线段。
+   */
+  it('包裹交替的分组框内不得有横穿中间的「穿心」水平线', () => {
+    const gp = DEFAULT_METRICS.padX + 6; // 组内水平内边距（padX+6）
+    for (const p of ['(a|b)', '(x|(y|z))', '((1|(a|b))|d)', '^((1|(a|b))|\\d)$']) {
+      const d = diagramFor(p);
+      const groups = d.boxes.filter((b) => b.tone === 'group');
+      expect(groups.length, `${p} 应有捕获组框`).toBeGreaterThan(0);
+      for (const g of groups) {
+        // 组左 stub 的 y = 该组的 spineY
+        const leftStub = d.edges.find(
+          (e) =>
+            Math.abs(e.from.y - e.to.y) < 0.01 &&
+            Math.abs(e.from.x - g.x) < 0.6 &&
+            e.to.x - e.from.x > 0.6 &&
+            e.to.x - e.from.x <= gp + 0.6
+        );
+        if (leftStub === undefined) continue; // 非分叉内容(纯序列)的组不画短左 stub，跳过
+        const y = leftStub.from.y;
+        const interiorL = g.x + gp + 0.6;
+        const interiorR = g.x + g.w - gp - 0.6;
+        const through = d.edges.some(
+          (e) =>
+            Math.abs(e.from.y - e.to.y) < 0.01 &&
+            Math.abs(e.from.y - y) < 0.6 &&
+            e.from.x >= interiorL &&
+            e.to.x <= interiorR
+        );
+        expect(through, `${p}：组 x=${g.x} 内 spineY=${y} 出现穿心水平线`).toBe(false);
+      }
+    }
+  });
+
+  /**
    * 钉死五种前缀在中英双语下：① 水平居中于框 ② 整块在框上沿之上 ③ 字号=prefixFontSize。
    */
   it('前缀标签居中于框、浮在框正上方、用独立小字号', () => {

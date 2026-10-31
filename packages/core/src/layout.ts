@@ -170,6 +170,13 @@ function railEdge(id: string, width: number, railY: number): DiagramEdge | null 
     : null;
 }
 
+/** 任意一段水平连线 [x1→x2] @y（x2≤x1 返回 null）。用于容器只补「左右进出 stub」而非整宽线。 */
+function hseg(id: string, x1: number, x2: number, y: number): DiagramEdge | null {
+  return x2 - x1 > 0.01
+    ? Object.freeze({ id, from: Object.freeze({ x: x1, y }), to: Object.freeze({ x: x2, y }) })
+    : null;
+}
+
 interface Ctx {
   readonly m: DiagramMetrics;
   readonly locale: Locale;
@@ -427,10 +434,14 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
         below = skipDepth;
       }
 
-      const qRail = railEdge(`${idPath}.rl`, slotWidth, railY);
+      // 量化槽也只补左右 stub（连到被包元素主轨）；被包元素若是 choice，中间留空不画整宽线。
+      const qStubs = [
+        hseg(`${idPath}.rlL`, 0, inset, railY),
+        hseg(`${idPath}.rlR`, inset + inner.width, slotWidth, railY)
+      ].filter((e): e is DiagramEdge => e !== null);
       return {
         boxes,
-        edges: [...shiftEdges(inner.edges, inset, 0), ...(qRail ? [qRail] : [])],
+        edges: [...shiftEdges(inner.edges, inset, 0), ...qStubs],
         paths,
         // 占位宽只由被包元素 + 弧 inset 决定，**不含标签宽**（标签可溢出，见上注释）
         width: slotWidth,
@@ -468,7 +479,13 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
       // 标签水平居中于整框（tagW 可能大于 groupW → 左右对称外溢，因在框上方故不违和）。
       const labelX = (groupW - tagW) / 2;
       const labelY = containerY - labelGap - tagH;
-      const gRail = railEdge(`${idPath}.rl`, groupW, inner.railY);
+      // 容器只补「左右进出 stub」（把框左右缘接到内容主轨），中段交给 inner 自己决定：
+      // inner 是 sequence → 自带贯穿轨（连续）；inner 是 choice → 中间本应留空，绝不画整宽线
+      // （否则沿 spineY 的整宽线直穿分叉中间 = 多余的「穿心主横线」）。
+      const gStubs = [
+        hseg(`${idPath}.rlL`, 0, padX, inner.railY),
+        hseg(`${idPath}.rlR`, padX + inner.width, groupW, inner.railY)
+      ].filter((e): e is DiagramEdge => e !== null);
       return {
         boxes: [
           box(
@@ -497,7 +514,7 @@ function place(node: AstNode, idPath: string, depth: number, ctx: Ctx): Placed {
           ),
           ...shift(inner.boxes, padX, 0)
         ],
-        edges: [...shiftEdges(inner.edges, padX, 0), ...(gRail ? [gRail] : [])],
+        edges: [...shiftEdges(inner.edges, padX, 0), ...gStubs],
         paths: shiftPaths(inner.paths, padX, 0),
         width: groupW,
         height: inner.height,

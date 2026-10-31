@@ -628,7 +628,11 @@ function placeChoice(node: AstNode, idPath: string, depth: number, ctx: Ctx): Pl
     boxes.push(...shift(branch.boxes, m.gapX, bodyTop));
     edges.push(...shiftEdges(branch.edges, m.gapX, bodyTop));
     paths.push(...shiftPaths(branch.paths, m.gapX, bodyTop));
-    mids.push(bodyTop + branch.height / 2);
+    // 分支中线 = 该分支**实际主轨** y（branch.railY），不是 height/2。
+    // 当某分支本身是嵌套组/交替时，它的主轨在 branch.railY（内层 spine），未必等于 height/2；
+    // 用 height/2 会让肘线接到 y=bodyTop+height/2、而分支主轨在 bodyTop+railY，两者差一截 =
+    // 出口横线上下错位（实测 `((1|(a|b))|d)` 出现 elbow y=151 无对应水平轨）。
+    mids.push(bodyTop + branch.railY);
     offset = bodyTop + branch.height + branch.below + m.gapY;
   });
 

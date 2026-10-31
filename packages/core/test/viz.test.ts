@@ -331,6 +331,27 @@ describe('layout 不变量', () => {
   });
 
   /**
+   * 使用者反馈：嵌套交替（如 `((1|(a|b))|d)`）里分支出口横线上下错位（阶梯断层）。
+   * 根因：分支中线用了 `height/2` 而非该分支真实主轨 `railY`。钉死不变量：每个 choice
+   * 分歧线的**终点 y**（接入分支处）必须能在图里找到一条同 y 的水平连线（该分支的主轨），
+   * 否则肘线悬空、与分支轨差一截 = 错位。
+   */
+  it('嵌套交替的分支肘线终点 y 必落在该分支真实主轨 y 上（无阶梯断层）', () => {
+    const hasHorizEdgeAt = (d: Diagram, y: number): boolean =>
+      d.edges.some(
+        (e) => Math.abs(e.from.y - e.to.y) < 0.01 && Math.abs(e.from.y - y) < 0.6
+      );
+    for (const p of ['((1|(a|b))|d)', '(1|(a|b))', '(a|(b|c))', '((a|b)|(c|d))', '(x|(y|(z|w)))']) {
+      const d = diagramFor(p);
+      const ins = d.paths.filter((pt) => pt.tone === 'choice' && pt.id.includes('.in'));
+      for (const cp of ins) {
+        const endY = cp.points[cp.points.length - 1][1];
+        expect(hasHorizEdgeAt(d, endY), `${p}：肘线终点 y=${endY.toFixed(1)} 无对应水平主轨（错位）`).toBe(true);
+      }
+    }
+  });
+
+  /**
    * 使用者反馈：前缀标签要「居中 + 移到框上方」，字号独立于次数标签。
    * 钉死五种前缀在中英双语下：① 水平居中于框 ② 整块在框上沿之上 ③ 字号=prefixFontSize。
    */

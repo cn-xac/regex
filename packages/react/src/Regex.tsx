@@ -109,7 +109,9 @@ export const Regex = forwardRef<RegexHandle, RegexProps>(function Regex(props, r
   const diagram = useMemo<string>(() => {
     const result = parsePattern(parsed.pattern, parsed.flags);
     if (!result.ok) return '';
-    return renderSvg(layoutRailroad(result.ast, { locale }), { theme: svgTheme });
+    return renderSvg(layoutRailroad(result.ast, { locale, flags: parsed.flags }), {
+      theme: svgTheme
+    });
   }, [parsed, svgTheme, locale]);
 
   /** 匹配结果 → 区间 → 渲染片段；三步全在 core，视图只负责铺节点。 */

@@ -107,7 +107,7 @@ function VanillaPanel({
     if (host === null) return;
     const result = parsePattern(pattern, normalizeFlags(flags));
     host.innerHTML = result.ok
-      ? renderSvg(layoutRailroad(result.ast, { locale: resolveLocale(candidates) }), {
+      ? renderSvg(layoutRailroad(result.ast, { locale: resolveLocale(candidates), flags: normalizeFlags(flags) }), {
           theme: controls.theme
         })
       : '';

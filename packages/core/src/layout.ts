@@ -14,8 +14,9 @@
  * 5. **内容与框之间留白，且主体在内容区垂直居中**；标签与量化后缀都不参与垂直分配，
  *    否则同一条序列里的元素会互相错位。
  */
-import { quantifierLabel, tokenLabel, boundaryLabel, translate } from './i18n';
+import { quantifierLabel, tokenLabel, boundaryLabel, anchorLabel, translate } from './i18n';
 import type { Locale } from './i18n';
+import { hasFlag } from './flags';
 import type { AstNode, GroupKind } from './parser';
 import type { SourceRange } from './types';
 
@@ -112,6 +113,12 @@ export interface LayoutOptions {
   readonly metrics?: Partial<DiagramMetrics>;
   /** 图上文字的语言（默认与界面一致由调用方决定，这里不读 navigator）。 */
   readonly locale?: Locale;
+  /**
+   * 正则修饰符原始串（如 `'gim'`）。仅供**锚点 `^`/`$` 的多行语义**取标签用：带 `m` 时 `^`/`$`
+   * 匹配每行首尾（「行首/行尾」），否则整串首尾（「整串开头/整串结尾」）。layout 不校验 flags，
+   * 非法字符由上层 `parseFlags` 负责；缺省视为无 flag。
+   */
+  readonly flags?: string;
 }
 
 export interface Diagram {
@@ -180,6 +187,8 @@ function hseg(id: string, x1: number, x2: number, y: number): DiagramEdge | null
 interface Ctx {
   readonly m: DiagramMetrics;
   readonly locale: Locale;
+  /** 原始 flags 串（缺省 ''）；`leafLabel` 用它判 `m` 给 `^`/`$` 选多行/整串标签。 */
+  readonly flags: string;
 }
 
 interface Placed {
@@ -303,8 +312,10 @@ function leafLabel(node: AstNode, ctx: Ctx): { label: string; tone: BoxTone; esc
       };
     case 'assertion': {
       const text = node.text ?? '';
-      if (text === '^' || text === '$') return { label: text, tone: 'anchor' };
-      // \b / \B 出中文语义（含义隐晦），^ $ 保持符号；原始写法存 escaped 保留可逆。
+      // `^`/`$` 走本地化 + 多行语义标签（带 m → 行首/行尾，否则整串开头/结尾）；原始符号存 escaped 保可逆。
+      const anchor = anchorLabel(ctx.locale, text, hasFlag(ctx.flags, 'm'));
+      if (anchor !== null) return { label: anchor, tone: 'anchor', escaped: text };
+      // \b / \B 出中文语义（含义隐晦）。原始写法存 escaped 保留可逆。
       const boundary = boundaryLabel(ctx.locale, text);
       if (boundary !== null) return { label: boundary, tone: 'anchor', escaped: BS + text };
       return { label: BS + text, tone: 'anchor' };
@@ -736,7 +747,8 @@ function shiftPaths(paths: readonly DiagramPath[], dx: number, dy: number): Diag
 export function layoutRailroad(ast: AstNode, options: LayoutOptions = {}): Diagram {
   const ctx: Ctx = {
     m: { ...DEFAULT_METRICS, ...options.metrics },
-    locale: options.locale ?? 'zh-CN'
+    locale: options.locale ?? 'zh-CN',
+    flags: options.flags ?? ''
   };
   const m = ctx.m;
   const placed = place(ast, 'r', 0, ctx);

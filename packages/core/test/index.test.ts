@@ -30,6 +30,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'MESSAGES',
   'PATTERN_METACHARACTERS',
   'SUPPORTED_LOCALES',
+  'anchorLabel',
   'applyCanvasOps',
   'boundaryLabel',
   'checkFlagSupport',

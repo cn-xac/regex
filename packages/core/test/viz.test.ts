@@ -202,15 +202,18 @@ describe('layout 不变量', () => {
     expect(boxesOf('\\s\\+', 'zh-CN').map((b) => b.label)).toEqual(['空白', '\\+']);
   });
 
-  /** \b / \B 含义隐晦，图上给中文语义并保留原始写法可逆；^ $ 仍是符号。 */
-  it('词边界 \\b/\\B 出语义标签，^ $ 保持符号', () => {
-    const anchors = (p: string, locale: Locale = 'zh-CN') =>
-      boxesOf(p, locale).filter((b) => b.tone === 'anchor');
-    expect(anchors('\\b\\B').map((b) => b.label)).toEqual(['单词边界', '非单词边界']);
-    expect(anchors('\\b\\B').map((b) => b.escaped)).toEqual(['\\b', '\\B']);
-    expect(anchors('\\b', 'en').map((b) => b.label)).toEqual(['word boundary']);
-    // ^ $ 不翻译
-    expect(anchors('^$').map((b) => b.label)).toEqual(['^', '$']);
+  /** \b / \B 出语义标签；^ $ 也走本地化 + 多行语义（带 m→行首/行尾，否则整串开头/结尾），原始符号存 escaped。 */
+  it('锚点 \\b/\\B 出语义标签，^ $ 随 m flag 出「整串」或「行」语义', () => {
+    const anchorBoxes = (p: string, locale: Locale = 'zh-CN', flags = '') =>
+      layoutRailroad(astFor(p), { locale, flags }).boxes.filter((b) => b.tone === 'anchor');
+    expect(anchorBoxes('\\b\\B').map((b) => b.label)).toEqual(['单词边界', '非单词边界']);
+    expect(anchorBoxes('\\b\\B').map((b) => b.escaped)).toEqual(['\\b', '\\B']);
+    expect(anchorBoxes('\\b', 'en').map((b) => b.label)).toEqual(['word boundary']);
+    // 无 m：整串首尾；有 m：每行首尾。原始符号保留在 escaped。
+    expect(anchorBoxes('^$').map((b) => b.label)).toEqual(['整串开头', '整串结尾']);
+    expect(anchorBoxes('^$').map((b) => b.escaped)).toEqual(['^', '$']);
+    expect(anchorBoxes('^$', 'zh-CN', 'gm').map((b) => b.label)).toEqual(['行首', '行尾']);
+    expect(anchorBoxes('^$', 'en', 'm').map((b) => b.label)).toEqual(['line start', 'line end']);
   });
 
   /** 使用者反馈 3：组框上方标 #N；非捕获与断言用通俗中文短语，裸符号存 escaped 保可逆。 */

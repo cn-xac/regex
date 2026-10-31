@@ -104,6 +104,10 @@ export type MessageKey =
   | 'token.nonWhitespace'
   | 'token.wordBoundary'
   | 'token.nonWordBoundary'
+  | 'token.stringStart'
+  | 'token.stringEnd'
+  | 'token.lineStart'
+  | 'token.lineEnd'
   | 'token.quantZeroOrMore'
   | 'token.quantOneOrMore'
   | 'token.quantZeroOrOne'
@@ -182,6 +186,10 @@ const ZH: Record<MessageKey, string> = {
   'token.nonWhitespace': '非空白',
   'token.wordBoundary': '单词边界',
   'token.nonWordBoundary': '非单词边界',
+  'token.stringStart': '整串开头',
+  'token.stringEnd': '整串结尾',
+  'token.lineStart': '行首',
+  'token.lineEnd': '行尾',
   'token.quantZeroOrMore': '0次以上',
   'token.quantOneOrMore': '一次以上',
   'token.quantZeroOrOne': '0或1次',
@@ -261,6 +269,10 @@ const EN: Record<MessageKey, string> = {
   'token.nonWhitespace': 'non-whitespace',
   'token.wordBoundary': 'word boundary',
   'token.nonWordBoundary': 'non-word boundary',
+  'token.stringStart': 'start of input',
+  'token.stringEnd': 'end of input',
+  'token.lineStart': 'line start',
+  'token.lineEnd': 'line end',
   'token.quantZeroOrMore': '0 or more',
   'token.quantOneOrMore': '1 or more',
   'token.quantZeroOrOne': '0 or 1',
@@ -373,6 +385,17 @@ export function tokenLabel(locale: Locale, escaped: string): string | null {
 export function boundaryLabel(locale: Locale, text: string): string | null {
   if (text === 'b') return translate(locale, 'token.wordBoundary');
   if (text === 'B') return translate(locale, 'token.nonWordBoundary');
+  return null;
+}
+
+/**
+ * 行/串锚点 `^` / `$` 的图上语义标签。`multiline=true`（带 `m` flag）时 `^` `$` 匹配**每行**
+ * 首尾，否则匹配**整串**首尾 —— 含义随 flag 变，故需把 flags 传进布局层再取此标签。
+ * 返回 `null` 表示不是 `^`/`$`，调用方应退回原始符号。原始写法由视图存 `data-escaped` 保可逆。
+ */
+export function anchorLabel(locale: Locale, text: string, multiline: boolean): string | null {
+  if (text === '^') return translate(locale, multiline ? 'token.lineStart' : 'token.stringStart');
+  if (text === '$') return translate(locale, multiline ? 'token.lineEnd' : 'token.stringEnd');
   return null;
 }
 

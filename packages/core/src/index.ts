@@ -103,6 +103,7 @@ export {
   FALLBACK_LOCALE,
   MESSAGES,
   SUPPORTED_LOCALES,
+  anchorLabel,
   boundaryLabel,
   createTranslator,
   flagMessage,

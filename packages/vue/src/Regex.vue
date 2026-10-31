@@ -108,7 +108,10 @@ function onTextInput(event: Event): void {
 const diagram = computed<string>(() => {
   const result = parsePattern(parsed.value.pattern, parsed.value.flags);
   if (!result.ok) return '';
-  return renderSvg(layoutRailroad(result.ast, { locale: locale.value }), { theme: props.svgTheme });
+  return renderSvg(
+    layoutRailroad(result.ast, { locale: locale.value, flags: parsed.value.flags }),
+    { theme: props.svgTheme }
+  );
 });
 
 function onSourceInput(event: Event): void {

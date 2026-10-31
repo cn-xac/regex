@@ -85,13 +85,14 @@ function lines(
 export const LIGHT: ThemePalette = Object.freeze({
   name: 'light',
   box: Object.freeze({
-    text: box('#00000000', '#d5dde8', '#0f172a', 6),
-    dot: box('#00000000', '#c2e0c2', '#143414', 10),
-    escape: box('#00000000', '#a3d0a3', '#123a1e', 5),
-    characterClass: box('#00000000', '#c8b6f0', '#2d1660', 5),
-    anchor: box('#00000000', '#f2d38a', '#5a3d05', 6),
+    // 叶子盒子：纯填充（无描边）+ 白字，对标 Regulex 按语义分色分半径。
+    text: box('#00000000', '#0284C7', '#ffffff', 5),
+    dot: box('#00000000', '#166534', '#ffffff', 10),
+    escape: box('#00000000', '#228B22', '#ffffff', 5),
+    characterClass: box('#00000000', '#7C3AED', '#ffffff', 5),
+    anchor: box('#00000000', '#D97706', '#ffffff', 6),
     assertion: box('#2b8a3e', '#00000000', '#175c28', 6, CONTAINER_DASH),
-    backreference: box('#00000000', '#86a7d6', '#10233f', 8),
+    backreference: box('#00000000', '#1E3A8A', '#ffffff', 8),
     group: box('#1c63b5', '#00000000', '#123a63', 6, CONTAINER_DASH),
     nonCapturing: box('#94a3b8', '#00000000', '#334155', 6, CONTAINER_DASH),
     choice: box('#94a3b8', '#00000000', '#0f172a', 6, CONTAINER_DASH),
@@ -104,13 +105,14 @@ export const LIGHT: ThemePalette = Object.freeze({
 export const DARK: ThemePalette = Object.freeze({
   name: 'dark',
   box: Object.freeze({
-    text: box('#00000000', '#252c37', '#e6eaf0', 6),
-    dot: box('#00000000', '#274d33', '#c6f5d0', 10),
-    escape: box('#00000000', '#274d33', '#c6f5d0', 5),
-    characterClass: box('#00000000', '#3a2c66', '#ddcdff', 5),
-    anchor: box('#00000000', '#4a3d12', '#ffe9a8', 6),
+    // 深色主题用更亮的饱和色，保持白字可读。
+    text: box('#00000000', '#0EA5E9', '#ffffff', 5),
+    dot: box('#00000000', '#15803D', '#ffffff', 10),
+    escape: box('#00000000', '#16A34A', '#ffffff', 5),
+    characterClass: box('#00000000', '#8B5CF6', '#ffffff', 5),
+    anchor: box('#00000000', '#F59E0B', '#ffffff', 6),
     assertion: box('#69db7c', '#00000000', '#c6f5d0', 6, CONTAINER_DASH),
-    backreference: box('#00000000', '#4d3a1a', '#ffd8b0', 8),
+    backreference: box('#00000000', '#3B82F6', '#ffffff', 8),
     group: box('#74c0fc', '#00000000', '#bfe0ff', 6, CONTAINER_DASH),
     nonCapturing: box('#8b98a9', '#00000000', '#c4ccd6', 6, CONTAINER_DASH),
     choice: box('#64748b', '#00000000', '#e6eaf0', 6, CONTAINER_DASH),

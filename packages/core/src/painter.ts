@@ -26,7 +26,7 @@ export interface PaintOptions {
 const DEFAULT_FONT = "ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, monospace";
 
 /** 填充型叶子盒的描边宽度（px）：比连线细一档，只勾边界、不抢主轨视觉。 */
-const BOX_BORDER_WIDTH = 1;
+
 
 function pt(v: readonly [number, number]): string {
   return `${round(v[0])} ${round(v[1])}`;
@@ -169,8 +169,8 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
         ` data-tone="${box.tone}" data-depth="${box.depth}"${attrs}>`
     );
     if (!tag) {
-      // 填充圆角矩形 + 1px 边框（边框取主题轨道色 `edge`，让字符/类/转义等盒子边界清晰可辨）；
-      // 透明填充的（组 / 断言 / 交替容器）走虚线描边。圆角半径按 tone 从主题取（`.` 10 / 反向引用 8 / 容器 6 / 类成员 5）。
+      // 纯填充圆角矩形无描边（对标 Regulex）；透明填充的（组 / 断言 / 交替容器）走虚线描边。
+      // 圆角半径按 tone 从主题取（`.` 10 / 反向引用 8 / 容器 6 / 类成员 5）。
       const isContainer = paint.fill === '#00000000';
       const dashAttr =
         isContainer && paint.dash !== null ? ` stroke-dasharray="${paint.dash.join(' ')}"` : '';
@@ -179,7 +179,7 @@ export function renderSvg(diagram: Diagram, options: PaintOptions = {}): string 
           ` rx="${paint.radius}"` +
           (isContainer
             ? ` fill="none" stroke="${paint.stroke}"${dashAttr}`
-            : ` fill="${paint.fill}" stroke="${edge}" stroke-width="${BOX_BORDER_WIDTH}"`) +
+            : ` fill="${paint.fill}" stroke="none"`) +
           '/>'
       );
     }
@@ -290,17 +290,11 @@ export function renderCanvasOps(diagram: Diagram, options: PaintOptions = {}): r
           { kind: 'stroke' }
         );
       } else {
-        // 填充盒 + 1px 边框（取主题轨道色）。描完临时切线宽须还原 edgeWidth，
-        // 否则后续容器/连线的线宽会被带细。
+        // 纯填充无描边（对标 Regulex）。
         ops.push(
           { kind: 'setFill', value: paint.fill },
           { kind: 'rect', x: round(box.x), y: round(box.y), w: round(box.w), h: round(box.h), radius: paint.radius },
-          { kind: 'fill' },
-          { kind: 'setLineWidth', value: BOX_BORDER_WIDTH },
-          { kind: 'setStroke', value: edge },
-          { kind: 'rect', x: round(box.x), y: round(box.y), w: round(box.w), h: round(box.h), radius: paint.radius },
-          { kind: 'stroke' },
-          { kind: 'setLineWidth', value: edgeWidth }
+          { kind: 'fill' }
         );
       }
     }
